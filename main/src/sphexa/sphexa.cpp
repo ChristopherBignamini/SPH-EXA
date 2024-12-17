@@ -77,6 +77,7 @@ int main(int argc, char** argv)
 
     using Dataset = SimulationData<AccType>;
     using Domain  = cstone::Domain<sph::SphTypes::KeyType, sph::SphTypes::CoordinateType, AccType>;
+    using ParticleIndexVectorType = Propagator<Domain, Dataset>::ParticleIndexVectorType;
 
     const std::string        initCond     = parser.get("--init");
     const size_t             problemSize  = parser.get("-n", 50);
@@ -94,7 +95,9 @@ int main(int argc, char** argv)
     const std::string        profFreqStr  = parser.get("--profile", maxStepStr);
     const bool               profEnabled  = parser.exists("--profile");
     const std::string        pmroot       = parser.get("--pmroot", std::string("/sys/cray/pm_counters"));
+    const std::string        idSel        = parser.get("--idSel");
     std::string              outFile      = parser.get("-o", "dump_" + removeModifiers(initCond));
+
 
     std::ofstream nullOutput("/dev/null");
     std::ostream& output = (quiet || rank) ? nullOutput : std::cout;
@@ -102,10 +105,21 @@ int main(int argc, char** argv)
 
     //! @brief evaluate user choice for different kind of actions
     auto fileWriter  = fileWriterFactory(ascii, MPI_COMM_WORLD);
+    auto selParticlesFileWriter  = fileWriterFactory(ascii, MPI_COMM_WORLD);
     auto fileReader  = fileReaderFactory(ascii, MPI_COMM_WORLD);
     auto simInit     = initializerFactory<Dataset>(initCond, glassBlock, fileReader.get());
     auto propagator  = propagatorFactory<Domain, Dataset>(propChoice, avClean, output, rank, simInit->constants());
     auto observables = observablesFactory<Dataset>(simInit->constants(), constantsFile);
+
+    // Particle selection for output
+//    auto particleSelectionId = particleSelection(idSel, fileReader.get());
+    ParticleIndexVectorType selParticlesIds;
+    std::string selParticlesOutFile;
+    bool saveSelParticles = !idSel.empty();
+    saveSelParticles = true;
+    selParticlesIds.push_back(3);
+    selParticlesIds.push_back(23);
+    selParticlesIds.push_back(2323);
 
     Dataset simData;
     simData.comm = MPI_COMM_WORLD;
@@ -140,6 +154,22 @@ int main(int argc, char** argv)
     propagator->sync(domain, simData);
     if (rank == 0) std::cout << "Domain synchronized, nLocalParticles " << d.x.size() << std::endl;
 
+    // Particle selection for output
+    ParticleIndexVectorType localSelectedParticlesIndexes;
+    if (saveSelParticles) {
+
+        if (rank == 0) std::cout << "Run identification of particle subset" << std::endl;
+
+        // Set file name for selected particles output
+        selParticlesOutFile = "selected_particles_" + outFile;
+
+        // Find indexes (position) of selected particles in local domain
+        // TODO: instead of static function use data member of propagator to store the status?
+        //       If we assume particle won't disappear from subdomain it could save us some time
+        localSelectedParticlesIndexes = propagator->getSelectedParticleIndexes(selParticlesIds, simData.hydro); //TODO : auto const
+    }
+
+
     viz::init_catalyst(argc, argv);
     viz::init_ascent(d, domain.startIndex());
 
@@ -156,6 +186,14 @@ int main(int argc, char** argv)
             observables->computeAndWrite(simData, domain.startIndex(), domain.endIndex(), box);
         }
 
+        if (saveSelParticles) {
+
+            // Write selected particles fields to file
+            selParticlesFileWriter->addStep(0, localSelectedParticlesIndexes.size(), selParticlesOutFile);
+            propagator->saveSelParticlesFields(selParticlesFileWriter.get(), domain.startIndex(), domain.endIndex(), localSelectedParticlesIndexes, simData.hydro);
+            selParticlesFileWriter->closeStep();
+        }
+
         bool isWallClockReached = totalTimer.elapsed() > simDuration;
 
         isOutputTriggered = isOutputStep(d.iteration, writeFreqStr) ||
@@ -166,8 +204,16 @@ int main(int argc, char** argv)
         if (isOutputTriggered && propagator->isSynced())
         {
             fileWriter->addStep(domain.startIndex(), domain.endIndex(), outFile);
+            std::cout<<"Chri in main loop, before simData.hydro.loadOrStoreAttributes"<<std::endl;
+
+            // Flag selected particles in simulation hydro data, this is needed to store them as attributes
+            if (saveSelParticles) simData.hydro.flagSelectedParticles(localSelectedParticlesIndexes, true);
             simData.hydro.loadOrStoreAttributes(fileWriter.get());
+            if (saveSelParticles) simData.hydro.flagSelectedParticles(localSelectedParticlesIndexes, false);
+
+            std::cout<<"Chri in main loop, after simData.hydro.loadOrStoreAttributes"<<std::endl;
             box.loadOrStore(fileWriter.get());
+            std::cout << "Chri domain.startIndex(), domain.endIndex() " << domain.startIndex() << " " << domain.endIndex() << std::endl;
             propagator->saveFields(fileWriter.get(), domain.startIndex(), domain.endIndex(), simData, box);
             propagator->save(fileWriter.get());
             fileWriter->closeStep();

@@ -54,6 +54,9 @@
 #include "particles_data_gpu.cuh"
 #endif
 
+// TODO: move to the right place
+//#include "propagator/ipropagator.hpp"
+
 namespace sphexa
 {
 
@@ -144,8 +147,15 @@ public:
         //! @brief load or store an attribute, skips non-existing attributes on load.
         auto optionalIO = [ar](const std::string& attribute, auto* location, size_t attrSize)
         {
+
             try
             {
+                // TODO: how do we manage the case of a zero size attribute?
+                if(attrSize == 0)
+                {
+                    throw std::out_of_range("Attribute size is zero");
+                }
+
                 if constexpr (std::is_enum_v<std::decay_t<decltype(*location)>>)
                 {
                     // handle pointers to enum by casting to the underlying type
@@ -155,14 +165,23 @@ public:
                     ar->stepAttribute(attribute, &tmp, attrSize);
                     *location = static_cast<EType>(tmp);
                 }
-                else { ar->stepAttribute(attribute, location, attrSize); }
+                else
+                {
+                    ar->stepAttribute(attribute, location, attrSize);
+                }
             }
             catch (std::out_of_range&)
             {
                 if (ar->rank() == 0)
                 {
-                    std::cout << "Attribute " << attribute << " not set in file, setting to default value " << *location
-                              << std::endl;
+                    if(attrSize == 0) {
+                        // TODO: what is default value in this case?
+                        std::cout << "Attribute " << attribute << " not set in file (size zero), setting to default value " << std::endl;
+                    }
+                    else {
+                        std::cout << "Attribute " << attribute << " not set in file, setting to default value " << *location
+                                  << std::endl;
+                    }
                 }
             }
         };
@@ -188,6 +207,15 @@ public:
 
         optionalIO("sincIndex", &sincIndex, 1);
         optionalIO("kernelChoice", &kernelChoice, 1);
+
+        FieldVector<uint64_t> selectedParticlesIds;
+        std::for_each(id.begin(), id.end(),
+            [&selectedParticlesIds](uint64_t& i) {
+                // Check if the MSB is set
+                if((i & msbMask) != 0) { selectedParticlesIds.push_back(i & ~msbMask); }
+            }
+        );
+        optionalIO("selectedParticlesIds", selectedParticlesIds.data(), selectedParticlesIds.size());
 
         createTables();
     }
@@ -359,6 +387,27 @@ public:
     std::vector<std::string> outputFieldNames;
 
     float getAllocGrowthRate() const { return allocGrowthRate_; }
+
+    //! @brief Set/Unset the MSB of the id field to indentify the selected particles
+    using ParticleIdType = decltype(id)::value_type;
+    static constexpr ParticleIdType msbMask = static_cast<ParticleIdType>(1) << (sizeof(ParticleIdType)*8 - 1);
+    void flagSelectedParticles(auto localSelectedParticlePositions, bool flag = true) {
+
+        std::for_each(localSelectedParticlePositions.begin(), localSelectedParticlePositions.end(),
+            [&id = this->id, flag](auto selParticleIndex){
+
+            std::cout<<"particleId before "<<id[selParticleIndex]<<std::endl;
+            if(flag) {
+                id[selParticleIndex] = id[selParticleIndex] | msbMask;
+            }
+            else {
+                id[selParticleIndex] = id[selParticleIndex] & ~msbMask;
+            }
+            std::cout<<"particleId after "<<id[selParticleIndex]<<std::endl;
+
+        });
+    }
+
 
 private:
     void createTables()

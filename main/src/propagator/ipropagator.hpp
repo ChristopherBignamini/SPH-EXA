@@ -50,6 +50,9 @@ class Propagator
     using T = typename ParticleDataType::RealType;
 
 public:
+
+    using ParticleIndexVectorType = ParticlesData<typename ParticleDataType::AcceleratorType>::template FieldVector<uint64_t>;
+
     Propagator(std::ostream& output, int rank)
         : out(output)
         , timer(output)
@@ -75,6 +78,14 @@ public:
 
     //! @brief save particle data fields to file
     virtual void saveFields(IFileWriter*, size_t, size_t, ParticleDataType&, const cstone::Box<T>&){};
+
+    //! @brief save selected particle data fields to file                                                   // TODO: const ParticleDataType::HydroData&
+    void saveSelParticlesFields(IFileWriter* writer, size_t first, size_t last, const ParticleIndexVectorType& selectedParticlesPositions, ParticleDataType::HydroData& hydroSimData)
+    {
+        // TODO: outputSelParticlesAllocatedFields not needed, keeping it as separate function for refactoring reasons
+        outputSelParticlesAllocatedFields(writer, first, last, selectedParticlesPositions, hydroSimData);
+        timer.step("SelectedParticlesFileOutput");
+    }
 
     //! @brief save extra customizable stuff
     virtual void saveExtra(IFileWriter*, ParticleDataType&){};
@@ -130,6 +141,31 @@ public:
         out << "\n=== Total time for iteration(" << d.iteration << ") " << timer.sumOfSteps() << "s\n\n";
     }
 
+    //! @brief get the index (position) vector, in local domain, of selected particles
+    // TODO: last parameter should be const& but at some point we use the data() method which is non-const
+    static auto getSelectedParticleIndexes(const ParticleIndexVectorType& selParticlesIds, ParticleDataType::HydroData& hydroSimData) {
+
+        // TODO: should we run a domain sync before looking to the particles?
+        // sync(domain, simData);
+        ParticleIndexVectorType localSelectedParticlePositions;
+
+        // Get the column index of the id field
+        auto idColumn = hydroSimData.outputFieldIndices[std::find(hydroSimData.outputFieldNames.begin(), hydroSimData.outputFieldNames.end(), "id") - 
+                                                        hydroSimData.outputFieldNames.begin()];
+
+        // TODO: use copy_if
+        const ParticleIndexVectorType* localParticleIds(std::get<ParticleIndexVectorType*>(hydroSimData.data()[idColumn])); // = std::array<FieldVariant, sizeof...(fields)>{&fields...}
+        std::for_each(selParticlesIds.begin(), selParticlesIds.end(), [localParticleIds, &localSelectedParticlePositions](auto selParticleId){
+            const auto selParticleIndex = std::find(localParticleIds->begin(), localParticleIds->end(), selParticleId) - localParticleIds->begin();
+            if (selParticleIndex < localParticleIds->size()) {
+                localSelectedParticlePositions.push_back(selParticleIndex);
+            }
+        });
+
+        return localSelectedParticlePositions;
+    }
+
+
 protected:
     static void outputAllocatedFields(IFileWriter* writer, size_t first, size_t last, ParticleDataType& simData)
     {
@@ -168,6 +204,49 @@ protected:
 
         output(first, last, simData.hydro, writer);
         output(first, last, simData.chem, writer);
+    }
+
+    // TODO: last parameter should be const& nut at some point we use the data() method which is non-const
+    static void outputSelParticlesAllocatedFields(IFileWriter* writer, size_t first, size_t last, const ParticleIndexVectorType& selectedParticlesPositions, 
+        ParticleDataType::HydroData& hydroSimData)
+    {
+        auto fieldPointers = hydroSimData.data();
+        auto indicesDone   = hydroSimData.outputFieldIndices;
+        auto namesDone     = hydroSimData.outputFieldNames;
+    
+        // TODO: check existence of code duplication with method above
+        // TODO: here we assume that selected particles is the last field in the dataset
+        for (int i = int(indicesDone.size()) - 1; i >= 0; --i)
+        {
+            int fidx = indicesDone[i];
+            if (hydroSimData.isAllocated(fidx))
+            {
+                int column = std::find(hydroSimData.outputFieldIndices.begin(), hydroSimData.outputFieldIndices.end(), fidx) -
+                                       hydroSimData.outputFieldIndices.begin();
+
+                // TODO: the call frequency of this and of the outputAllocatedFields method will be different, 
+                // we can save transfer time with a status flag but it will be the current method the one that 
+                // will be called more frequently and which will be responsible for the data transfer.
+                // TODO: should we just transfer a minimal subset of particles including the selected ones?
+                transferToHost(hydroSimData, first, last, {hydroSimData.fieldNames[fidx]});
+
+                // Copy current field data to a new vector only for the selected particles
+                std::visit([writer, c = column, key = namesDone[i], &selectedParticlesPositions](auto field){
+                    std::remove_pointer_t<decltype(field)> selectedParticleFieldValues;
+                    // TODO: use copy_if
+                    // std::copy_if(field->begin(), field->end(), std::back_inserter(selectedParticleFieldPointers),
+                    //     [](){return true;});
+                    std::for_each(selectedParticlesPositions.begin(), selectedParticlesPositions.end(), [&selectedParticleFieldValues, &field](auto particlePosition){
+                        selectedParticleFieldValues.push_back(field->at(particlePosition));
+                        });
+                    writer->writeField(key, selectedParticleFieldValues.data(), c); 
+                },
+                fieldPointers[fidx]);             
+
+                indicesDone.erase(indicesDone.begin() + i);
+                namesDone.erase(namesDone.begin() + i);
+            }
+        }    
     }
 
     std::ostream& out;
