@@ -30,6 +30,8 @@
 
 #pragma once
 
+#include <mpi.h>
+
 #include <map>
 #include <string>
 #include <variant>
@@ -57,9 +59,10 @@ public:
     using FieldType   = util::Reduce<std::variant, util::Map<IO::ConstPtr, IO::Types>>;
     using FieldVector = util::Reduce<std::variant, util::Map<ToVec, IO::Types>>;
 
-    virtual int         rank() const     = 0;
-    virtual int         numRanks() const = 0;
-    virtual std::string suffix() const   = 0;
+    virtual int             rank() const     = 0;
+    virtual int             numRanks() const = 0;
+    virtual MPI_Comm        comm() const = 0;
+    virtual std::string     suffix() const   = 0;
 
     virtual ~IFileWriter() = default;
 
@@ -85,6 +88,8 @@ public:
     virtual ~IFileReader() = default;
 
     virtual int                      rank() const                                                       = 0;
+    virtual int                      numRanks() const                                                   = 0;
+    virtual MPI_Comm                 comm() const                                                       = 0;
     virtual int64_t                  numParticles() const                                               = 0;
     virtual void                     setStep(std::string path, int step, FileMode mode)                 = 0;
     virtual std::vector<std::string> fileAttributes()                                                   = 0;
@@ -103,6 +108,9 @@ class UnimplementedReader : public IFileReader
 {
 public:
     int                      rank() const override { return 0; };
+    int                      numRanks() const override { return 0; };
+    MPI_Comm                 comm() const override { return MPI_COMM_NULL; };
+
     int64_t                  numParticles() const override { return 0; };
     void                     setStep(std::string, int, FileMode) override { throwError(); }
     std::vector<std::string> fileAttributes() override

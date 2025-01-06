@@ -30,6 +30,8 @@
 
 #pragma once
 
+#include <mpi.h>
+
 #include <array>
 #include <vector>
 #include <variant>
@@ -53,9 +55,6 @@
 #include "sph/util/pinned_allocator.cuh"
 #include "particles_data_gpu.cuh"
 #endif
-
-// TODO: move to the right place
-//#include "propagator/ipropagator.hpp"
 
 namespace sphexa
 {
@@ -147,15 +146,8 @@ public:
         //! @brief load or store an attribute, skips non-existing attributes on load.
         auto optionalIO = [ar](const std::string& attribute, auto* location, size_t attrSize)
         {
-
             try
             {
-                // TODO: how do we manage the case of a zero size attribute?
-                if(attrSize == 0)
-                {
-                    throw std::out_of_range("Attribute size is zero");
-                }
-
                 if constexpr (std::is_enum_v<std::decay_t<decltype(*location)>>)
                 {
                     // handle pointers to enum by casting to the underlying type
@@ -174,14 +166,8 @@ public:
             {
                 if (ar->rank() == 0)
                 {
-                    if(attrSize == 0) {
-                        // TODO: what is default value in this case?
-                        std::cout << "Attribute " << attribute << " not set in file (size zero), setting to default value " << std::endl;
-                    }
-                    else {
-                        std::cout << "Attribute " << attribute << " not set in file, setting to default value " << *location
-                                  << std::endl;
-                    }
+                    std::cout << "Attribute " << attribute << " not set in file, setting to default value " << *location
+                                << std::endl;
                 }
             }
         };
@@ -208,14 +194,7 @@ public:
         optionalIO("sincIndex", &sincIndex, 1);
         optionalIO("kernelChoice", &kernelChoice, 1);
 
-        FieldVector<uint64_t> selectedParticlesIds;
-        std::for_each(id.begin(), id.end(),
-            [&selectedParticlesIds](uint64_t& i) {
-                // Check if the MSB is set
-                if((i & msbMask) != 0) { selectedParticlesIds.push_back(i & ~msbMask); }
-            }
-        );
-        optionalIO("selectedParticlesIds", selectedParticlesIds.data(), selectedParticlesIds.size());
+        selectedParticlesIO(ar);
 
         createTables();
     }
@@ -392,19 +371,14 @@ public:
     using ParticleIdType = decltype(id)::value_type;
     static constexpr ParticleIdType msbMask = static_cast<ParticleIdType>(1) << (sizeof(ParticleIdType)*8 - 1);
     void flagSelectedParticles(auto localSelectedParticlePositions, bool flag = true) {
-
         std::for_each(localSelectedParticlePositions.begin(), localSelectedParticlePositions.end(),
             [&id = this->id, flag](auto selParticleIndex){
-
-            std::cout<<"particleId before "<<id[selParticleIndex]<<std::endl;
             if(flag) {
                 id[selParticleIndex] = id[selParticleIndex] | msbMask;
             }
             else {
                 id[selParticleIndex] = id[selParticleIndex] & ~msbMask;
             }
-            std::cout<<"particleId after "<<id[selParticleIndex]<<std::endl;
-
         });
     }
 
@@ -418,6 +392,86 @@ private:
         whd     = sph::tabulateFunction<H, lt::kTableSize>(sph::getSphKernelDerivative(kernelChoice, sincIndex), 0, 2);
         devData.uploadTables(wh, whd);
     }
+
+    template<class Archive>
+    void selectedParticlesIO(Archive *ar)
+    {
+        FieldVector<uint64_t> localSelectedParticlesIds = {};
+
+        std::for_each(id.begin(), id.end(),
+        [&localSelectedParticlesIds](uint64_t& i) {
+            // Check if the MSB is set
+            if((i & msbMask) != 0) { localSelectedParticlesIds.push_back(i & ~msbMask); }
+        });
+
+        // In case of distributed attribute we need to differentiate between reading and writing and between
+        // the different reader/writer implementations (Builtin, ascii, HDF5, etc) For the tme being let's use MPI Comm to differentiate
+        // and let's assume that if the MPI Comm is valid we are in printing mode
+        if(ar->comm() != MPI_COMM_NULL)
+        {
+            // In order to print the selected particles id as attribute, using the existing code
+            // all task have to share the same list
+
+            // Get the number of selected particles for each MPI task
+            std::vector<int> numberOfSelectedParticlesForTask(ar->numRanks());
+            const auto numberOfLocalSelectedParticles = localSelectedParticlesIds.size();
+            if(ar->rank() ==  0){
+                std::cout<< "localSelectedParticlesIds size: "<<numberOfLocalSelectedParticles<<std::endl;
+            }
+
+            int errorStatus = MPI_Allgather(&numberOfLocalSelectedParticles, 1, MPI_INT, 
+                                            numberOfSelectedParticlesForTask.data(), 1, MPI_INT, ar->comm());
+
+            // TODO: implement exception handling
+            if(errorStatus != MPI_SUCCESS)
+            {
+                std::cerr << "Error in MPI_Allgather during number of selected particles retrieval" << std::endl;
+                MPI_Abort(ar->comm(), errorStatus);
+            }
+
+            // Define the displacements for the storage of the selected particles from all MPI tasks
+            std::vector<int> displacements(ar->numRanks(), 0);
+            for(auto i = 1; i<ar->numRanks(); i++){
+                displacements[i] = numberOfSelectedParticlesForTask[i-1];
+            }
+
+            // Collect the selected particles from all ranks
+            const auto numberOfTotalSelectedParticles =
+                std::accumulate(numberOfSelectedParticlesForTask.begin(), numberOfSelectedParticlesForTask.end(), 0);
+
+            std::vector<uint64_t> globalSelectedParticlesIds(numberOfTotalSelectedParticles);
+            if(ar->rank() ==  0){
+                std::cout<< "Total number of selected particles "<<globalSelectedParticlesIds.size()<<std::endl;
+            }
+            errorStatus = MPI_Allgatherv(localSelectedParticlesIds.data(),
+                                            numberOfLocalSelectedParticles,
+                                            MPI_UINT64_T,
+                                            globalSelectedParticlesIds.data(),
+                                            numberOfSelectedParticlesForTask.data(),
+                                            displacements.data(),//TODO: use numberOfSelectedParticlesForTask+1
+                                            MPI_UINT64_T,
+                                            ar->comm());
+
+
+            if(ar->rank() ==  0){
+                for(auto i = globalSelectedParticlesIds.begin(); i != globalSelectedParticlesIds.end(); i++){
+                    std::cout<< "Shared selected particles list after gather in rank  "<<ar->rank()<<":"<<*i<<std::endl;
+                }
+            }
+
+            // TODO: implement exception handling
+            if(errorStatus != MPI_SUCCESS)
+            {
+                std::cerr << "Error in MPI_Allgatherv during retrieval of global list of selected particles" << std::endl;
+                MPI_Abort(ar->comm(), errorStatus);
+            }
+
+            // Store the global list of selected particles as attribute
+            if(numberOfTotalSelectedParticles>0) {
+                ar->stepAttribute("selectedParticlesIds", globalSelectedParticlesIds.data(), globalSelectedParticlesIds.size());
+            }
+        }
+    };
 
     //! @brief buffer growth factor when reallocating
     float allocGrowthRate_{1.05};

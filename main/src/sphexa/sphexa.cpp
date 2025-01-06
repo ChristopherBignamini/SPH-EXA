@@ -118,8 +118,9 @@ int main(int argc, char** argv)
     bool saveSelParticles = !idSel.empty();
     saveSelParticles = true;
     selParticlesIds.push_back(3);
-    selParticlesIds.push_back(23);
-    selParticlesIds.push_back(2323);
+    // selParticlesIds.push_back(23);
+    // selParticlesIds.push_back(2323);
+    selParticlesIds.push_back(46000);
 
     Dataset simData;
     simData.comm = MPI_COMM_WORLD;
@@ -204,21 +205,17 @@ int main(int argc, char** argv)
         if (isOutputTriggered && propagator->isSynced())
         {
             fileWriter->addStep(domain.startIndex(), domain.endIndex(), outFile);
-            std::cout<<"Chri in main loop, before simData.hydro.loadOrStoreAttributes"<<std::endl;
-
-            // Flag selected particles in simulation hydro data, this is needed to store them as attributes
+            // // Flag selected particles in simulation hydro data, this is needed to store them as attributes
             if (saveSelParticles) simData.hydro.flagSelectedParticles(localSelectedParticlesIndexes, true);
             simData.hydro.loadOrStoreAttributes(fileWriter.get());
             if (saveSelParticles) simData.hydro.flagSelectedParticles(localSelectedParticlesIndexes, false);
-
-            std::cout<<"Chri in main loop, after simData.hydro.loadOrStoreAttributes"<<std::endl;
             box.loadOrStore(fileWriter.get());
-            std::cout << "Chri domain.startIndex(), domain.endIndex() " << domain.startIndex() << " " << domain.endIndex() << std::endl;
             propagator->saveFields(fileWriter.get(), domain.startIndex(), domain.endIndex(), simData, box);
             propagator->save(fileWriter.get());
             fileWriter->closeStep();
             isOutputTriggered = false;
         }
+
         if (isOutputStep(d.iteration, profFreqStr) || isOutputTime(d.ttot - d.minDt, d.ttot, profFreqStr) ||
             isWallClockReached)
         {

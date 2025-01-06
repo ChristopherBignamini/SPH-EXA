@@ -63,6 +63,7 @@ public:
 
     [[nodiscard]] int rank() const override { return rank_; }
     [[nodiscard]] int numRanks() const override { return numRanks_; }
+    [[nodiscard]] MPI_Comm comm() const override { return comm_; }
 
     std::string suffix() const override { return ".h5"; }
 
@@ -157,11 +158,15 @@ public:
         , h5File_{nullptr}
     {
         MPI_Comm_rank(comm, &rank_);
+        MPI_Comm_size(comm, &numRanks_);
     }
 
     ~H5PartReader() override { closeStep(); }
 
     [[nodiscard]] int     rank() const override { return rank_; }
+    [[nodiscard]] int numRanks() const override { return numRanks_; }
+    [[nodiscard]] MPI_Comm comm() const override { return comm_; }
+
     [[nodiscard]] int64_t numParticles() const override
     {
         if (!h5File_) { throw std::runtime_error("Cannot get number of particles: file not open\n"); }
@@ -190,13 +195,9 @@ public:
         globalCount_ = H5PartGetNumParticles(h5File_);
         if (globalCount_ < 1) { return; }
 
-        int rank, numRanks;
-        MPI_Comm_rank(comm_, &rank);
-        MPI_Comm_size(comm_, &numRanks);
-
         if (mode == FileMode::collective)
         {
-            std::tie(firstIndex_, lastIndex_) = partitionRange(globalCount_, rank, numRanks);
+            std::tie(firstIndex_, lastIndex_) = partitionRange(globalCount_, rank_, numRanks_);
             localCount_                       = lastIndex_ - firstIndex_;
             H5PartSetView(h5File_, firstIndex_, lastIndex_ - 1);
         }
@@ -291,7 +292,7 @@ private:
         return attrIndex;
     }
 
-    int      rank_{0};
+    int      rank_{0}, numRanks_{0};
     MPI_Comm comm_;
 
     uint64_t    firstIndex_, lastIndex_;
