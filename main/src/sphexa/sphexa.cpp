@@ -113,14 +113,28 @@ int main(int argc, char** argv)
 
     // Particle selection for output
 //    auto particleSelectionId = particleSelection(idSel, fileReader.get());
+    using ParticleIdType = uint64_t; // TODO: retrieve type from Dataset
+    constexpr ParticleIdType msbMask = static_cast<ParticleIdType>(1) << (sizeof(ParticleIdType)*8 - 1);
     ParticleIndexVectorType selParticlesIds;
+    ParticleIndexVectorType localSelectedParticlesIndexes;
+    bool tagSelectedParticles = false;
+    bool isSelectedParticleOutputTriggered = true;
     std::string selParticlesOutFile;
     bool saveSelParticles = !idSel.empty();
     saveSelParticles = true;
     selParticlesIds.push_back(3);
-    // selParticlesIds.push_back(23);
-    // selParticlesIds.push_back(2323);
+    selParticlesIds.push_back(23);
+    selParticlesIds.push_back(15000);
+    selParticlesIds.push_back(38500);
     selParticlesIds.push_back(46000);
+    if(saveSelParticles) {
+
+        // Activate particle selected tagging
+        tagSelectedParticles = true;
+
+        // Set file name for selected particles output
+        selParticlesOutFile = "selected_particles_" + outFile;
+    }
 
     Dataset simData;
     simData.comm = MPI_COMM_WORLD;
@@ -133,7 +147,6 @@ int main(int argc, char** argv)
     propagator->activateFields(simData);
     propagator->load(initCond, fileReader.get());
     auto box = simInit->init(rank, numRanks, problemSize, simData, fileReader.get());
-
     auto& d = simData.hydro;
     transferAllocatedToDevice(d, 0, d.x.size(), propagator->conservedFields());
     simData.setOutputFields(outputFields.empty() ? propagator->conservedFields() : outputFields);
@@ -153,23 +166,6 @@ int main(int argc, char** argv)
     domain.setGrowthAllocRate(simData.hydro.getAllocGrowthRate());
 
     propagator->sync(domain, simData);
-    if (rank == 0) std::cout << "Domain synchronized, nLocalParticles " << d.x.size() << std::endl;
-
-    // Particle selection for output
-    ParticleIndexVectorType localSelectedParticlesIndexes;
-    if (saveSelParticles) {
-
-        if (rank == 0) std::cout << "Run identification of particle subset" << std::endl;
-
-        // Set file name for selected particles output
-        selParticlesOutFile = "selected_particles_" + outFile;
-
-        // Find indexes (position) of selected particles in local domain
-        // TODO: instead of static function use data member of propagator to store the status?
-        //       If we assume particle won't disappear from subdomain it could save us some time
-        localSelectedParticlesIndexes = propagator->getSelectedParticleIndexes(selParticlesIds, simData.hydro); //TODO : auto const
-    }
-
 
     viz::init_catalyst(argc, argv);
     viz::init_ascent(d, domain.startIndex());
@@ -189,10 +185,24 @@ int main(int argc, char** argv)
 
         if (saveSelParticles) {
 
-            // Write selected particles fields to file
-            selParticlesFileWriter->addStep(0, localSelectedParticlesIndexes.size(), selParticlesOutFile);
-            propagator->saveSelParticlesFields(selParticlesFileWriter.get(), domain.startIndex(), domain.endIndex(), localSelectedParticlesIndexes, simData.hydro);
-            selParticlesFileWriter->closeStep();
+            // Reset the list of indexes of subdomain selected particles: this is needed since a specific particle can move to another rank 
+            localSelectedParticlesIndexes.clear();
+
+            // TODO: Check if selected particle tagging is needed:
+            // in a simulation starting from scratch we need to tag the selected particles if saveSelParticles is true and only in first iteration.
+            // In a simulation starting from a checkpoint file we need to tag the selected particles only if they are not already tagged? 
+            // Implementation of a check for tag existence in a checkpoint file is currently missing.
+            if(tagSelectedParticles){
+                // Find the selected particles in local id list and tag them by setting the MSB of the id field
+                std::for_each(selParticlesIds.begin(), selParticlesIds.end(), [&idList = d.id, &localSelectedParticlesIndexes, rank](auto selParticleId){
+                    const auto selParticleIndex = std::find(idList.begin(), idList.end(), selParticleId) - idList.begin();
+                    if (selParticleIndex < idList.size()) {
+                        localSelectedParticlesIndexes.push_back(selParticleIndex);
+                        idList[selParticleIndex] = idList[selParticleIndex] | msbMask;
+                    }
+                });
+            }
+            tagSelectedParticles = false;
         }
 
         bool isWallClockReached = totalTimer.elapsed() > simDuration;
@@ -205,15 +215,23 @@ int main(int argc, char** argv)
         if (isOutputTriggered && propagator->isSynced())
         {
             fileWriter->addStep(domain.startIndex(), domain.endIndex(), outFile);
-            // // Flag selected particles in simulation hydro data, this is needed to store them as attributes
-            if (saveSelParticles) simData.hydro.flagSelectedParticles(localSelectedParticlesIndexes, true);
             simData.hydro.loadOrStoreAttributes(fileWriter.get());
-            if (saveSelParticles) simData.hydro.flagSelectedParticles(localSelectedParticlesIndexes, false);
             box.loadOrStore(fileWriter.get());
             propagator->saveFields(fileWriter.get(), domain.startIndex(), domain.endIndex(), simData, box);
             propagator->save(fileWriter.get());
             fileWriter->closeStep();
             isOutputTriggered = false;
+        }
+
+
+        if (isSelectedParticleOutputTriggered) // && propatagor->isSynced
+        {
+            selParticlesFileWriter->addStep(0, localSelectedParticlesIndexes.size(), selParticlesOutFile);
+            simData.hydro.loadOrStoreAttributes(selParticlesFileWriter.get());
+            box.loadOrStore(selParticlesFileWriter.get());
+            propagator->saveSelParticlesFields(selParticlesFileWriter.get(), domain.startIndex(), domain.endIndex(), localSelectedParticlesIndexes, simData.hydro);
+            selParticlesFileWriter->closeStep();
+            isSelectedParticleOutputTriggered = false;
         }
 
         if (isOutputStep(d.iteration, profFreqStr) || isOutputTime(d.ttot - d.minDt, d.ttot, profFreqStr) ||
