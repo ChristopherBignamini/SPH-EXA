@@ -206,15 +206,23 @@ protected:
         output(first, last, simData.chem, writer);
     }
 
-    // TODO: last parameter should be const& nut at some point we use the data() method which is non-const
+    // TODO: last parameter should be const& but at some point we use the data() method which is non-const
     static void outputSelParticlesAllocatedFields(IFileWriter* writer, size_t first, size_t last, const ParticleIndexVectorType& selectedParticlesPositions, 
         ParticleDataType::HydroData& hydroSimData)
     {
         auto fieldPointers = hydroSimData.data();
         auto indicesDone   = hydroSimData.outputFieldIndices;
         auto namesDone     = hydroSimData.outputFieldNames;
-    
-        // TODO: check existence of code duplication with method above
+
+        // // Locally untag the selected particles to print the right ID
+        // // TODO: it can probably be done with templates
+        // constexpr uint64_t msbMask = static_cast<uint64_t>(1) << (sizeof(uint64_t)*8 - 1);
+        // std::vector<uint64_t> localSelectedParticlesIds = {};
+        // std::for_each(selectedParticlesPositions.begin(), selectedParticlesPositions.end(), [&hydroSimData, &localSelectedParticlesIds](auto particlePosition){
+        //     localSelectedParticlesIds.push_back(hydroSimData.id[particlePosition] & ~msbMask);
+        // });
+
+        // TODO: check existence of code duplication with outputAllocatedFields
         // TODO: here we assume that selected particles is the last field in the dataset
         for (int i = int(indicesDone.size()) - 1; i >= 0; --i)
         {
@@ -230,14 +238,16 @@ protected:
                 // TODO: should we just transfer a minimal subset of particles including the selected ones?
                 transferToHost(hydroSimData, first, last, {hydroSimData.fieldNames[fidx]});
 
+
                 // Copy current field data to a new vector only for the selected particles
                 std::visit([writer, c = column, key = namesDone[i], &selectedParticlesPositions](auto field){
                     std::remove_pointer_t<decltype(field)> selectedParticleFieldValues;
                     // TODO: use copy_if
                     // std::copy_if(field->begin(), field->end(), std::back_inserter(selectedParticleFieldPointers),
                     //     [](){return true;});
-                    std::for_each(selectedParticlesPositions.begin(), selectedParticlesPositions.end(), [&selectedParticleFieldValues, &field](auto particlePosition){
-                        selectedParticleFieldValues.push_back(field->at(particlePosition));
+                    std::for_each(selectedParticlesPositions.begin(), selectedParticlesPositions.end(),
+                        [&selectedParticleFieldValues, &field](auto particlePosition){
+                            selectedParticleFieldValues.push_back(field->at(particlePosition));
                         });
                     writer->writeField(key, selectedParticleFieldValues.data(), c); 
                 },
