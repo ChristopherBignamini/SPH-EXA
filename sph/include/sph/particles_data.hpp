@@ -30,8 +30,6 @@
 
 #pragma once
 
-#include <mpi.h>
-
 #include <array>
 #include <vector>
 #include <variant>
@@ -194,7 +192,7 @@ public:
         optionalIO("sincIndex", &sincIndex, 1);
         optionalIO("kernelChoice", &kernelChoice, 1);
 
-        selectedParticlesIO(ar);
+        // selectedParticlesIO(ar);
 
         createTables();
     }
@@ -393,85 +391,86 @@ private:
         devData.uploadTables(wh, whd);
     }
 
-    template<class Archive>
-    void selectedParticlesIO(Archive *ar)
-    {
-        FieldVector<uint64_t> localSelectedParticlesIds = {};
+    // TODO: buggy subroutine to store selected particles ID as attribute, needs to be fixed or removed. Requires #include <mpi.h>
+    // template<class Archive>
+    // void selectedParticlesIO(Archive *ar)
+    // {
+    //     FieldVector<uint64_t> localSelectedParticlesIds = {};
 
-        std::for_each(id.begin(), id.end(),
-        [&localSelectedParticlesIds](uint64_t& i) {
-            // Check if the MSB is set
-            if((i & msbMask) != 0) { localSelectedParticlesIds.push_back(i & ~msbMask); }
-        });
+    //     std::for_each(id.begin(), id.end(),
+    //     [&localSelectedParticlesIds](uint64_t& i) {
+    //         // Check if the MSB is set
+    //         if((i & msbMask) != 0) { localSelectedParticlesIds.push_back(i & ~msbMask); }
+    //     });
 
-        // In case of distributed attribute we need to differentiate between reading and writing and between
-        // the different reader/writer implementations (Builtin, ascii, HDF5, etc) For the tme being let's use MPI Comm to differentiate
-        // and let's assume that if the MPI Comm is valid we are in printing mode
-        if(ar->comm() != MPI_COMM_NULL)
-        {
-            // In order to print the selected particles id as attribute, using the existing code
-            // all task have to share the same list
+    //     // In case of distributed attribute we need to differentiate between reading and writing and between
+    //     // the different reader/writer implementations (Builtin, ascii, HDF5, etc) For the tme being let's use MPI Comm to differentiate
+    //     // and let's assume that if the MPI Comm is valid we are in printing mode
+    //     if(ar->comm() != MPI_COMM_NULL)
+    //     {
+    //         // In order to print the selected particles id as attribute, using the existing code
+    //         // all task have to share the same list
 
-            // Get the number of selected particles for each MPI task
-            std::vector<int> numberOfSelectedParticlesForTask(ar->numRanks());
-            const auto numberOfLocalSelectedParticles = localSelectedParticlesIds.size();
-            if(ar->rank() ==  0){
-                std::cout<< "localSelectedParticlesIds size: "<<numberOfLocalSelectedParticles<<std::endl;
-            }
+    //         // Get the number of selected particles for each MPI task
+    //         std::vector<int> numberOfSelectedParticlesForTask(ar->numRanks());
+    //         const auto numberOfLocalSelectedParticles = localSelectedParticlesIds.size();
+    //         if(ar->rank() ==  0){
+    //             std::cout<< "localSelectedParticlesIds size: "<<numberOfLocalSelectedParticles<<std::endl;
+    //         }
 
-            int errorStatus = MPI_Allgather(&numberOfLocalSelectedParticles, 1, MPI_INT, 
-                                            numberOfSelectedParticlesForTask.data(), 1, MPI_INT, ar->comm());
+    //         int errorStatus = MPI_Allgather(&numberOfLocalSelectedParticles, 1, MPI_INT, 
+    //                                         numberOfSelectedParticlesForTask.data(), 1, MPI_INT, ar->comm());
 
-            // TODO: implement exception handling
-            if(errorStatus != MPI_SUCCESS)
-            {
-                std::cerr << "Error in MPI_Allgather during number of selected particles retrieval" << std::endl;
-                MPI_Abort(ar->comm(), errorStatus);
-            }
+    //         // TODO: implement exception handling
+    //         if(errorStatus != MPI_SUCCESS)
+    //         {
+    //             std::cerr << "Error in MPI_Allgather during number of selected particles retrieval" << std::endl;
+    //             MPI_Abort(ar->comm(), errorStatus);
+    //         }
 
-            // Define the displacements for the storage of the selected particles from all MPI tasks
-            std::vector<int> displacements(ar->numRanks(), 0);
-            for(auto i = 1; i<ar->numRanks(); i++){
-                displacements[i] = numberOfSelectedParticlesForTask[i-1];
-            }
+    //         // Define the displacements for the storage of the selected particles from all MPI tasks
+    //         std::vector<int> displacements(ar->numRanks(), 0);
+    //         for(auto i = 1; i<ar->numRanks(); i++){
+    //             displacements[i] = numberOfSelectedParticlesForTask[i-1];
+    //         }
 
-            // Collect the selected particles from all ranks
-            const auto numberOfTotalSelectedParticles =
-                std::accumulate(numberOfSelectedParticlesForTask.begin(), numberOfSelectedParticlesForTask.end(), 0);
+    //         // Collect the selected particles from all ranks
+    //         const auto numberOfTotalSelectedParticles =
+    //             std::accumulate(numberOfSelectedParticlesForTask.begin(), numberOfSelectedParticlesForTask.end(), 0);
 
-            std::vector<uint64_t> globalSelectedParticlesIds(numberOfTotalSelectedParticles);
-            if(ar->rank() ==  0){
-                std::cout<< "Total number of selected particles "<<globalSelectedParticlesIds.size()<<std::endl;
-            }
-            errorStatus = MPI_Allgatherv(localSelectedParticlesIds.data(),
-                                            numberOfLocalSelectedParticles,
-                                            MPI_UINT64_T,
-                                            globalSelectedParticlesIds.data(),
-                                            numberOfSelectedParticlesForTask.data(),
-                                            displacements.data(),//TODO: use numberOfSelectedParticlesForTask+1
-                                            MPI_UINT64_T,
-                                            ar->comm());
+    //         std::vector<uint64_t> globalSelectedParticlesIds(numberOfTotalSelectedParticles);
+    //         if(ar->rank() ==  0){
+    //             std::cout<< "Total number of selected particles "<<globalSelectedParticlesIds.size()<<std::endl;
+    //         }
+    //         errorStatus = MPI_Allgatherv(localSelectedParticlesIds.data(),
+    //                                         numberOfLocalSelectedParticles,
+    //                                         MPI_UINT64_T,
+    //                                         globalSelectedParticlesIds.data(),
+    //                                         numberOfSelectedParticlesForTask.data(),
+    //                                         displacements.data(),//TODO: use numberOfSelectedParticlesForTask+1
+    //                                         MPI_UINT64_T,
+    //                                         ar->comm());
 
 
-            if(ar->rank() ==  0){
-                for(auto i = globalSelectedParticlesIds.begin(); i != globalSelectedParticlesIds.end(); i++){
-                    std::cout<< "Shared selected particles list after gather in rank  "<<ar->rank()<<":"<<*i<<std::endl;
-                }
-            }
+    //         if(ar->rank() ==  0){
+    //             for(auto i = globalSelectedParticlesIds.begin(); i != globalSelectedParticlesIds.end(); i++){
+    //                 std::cout<< "Shared selected particles list after gather in rank  "<<ar->rank()<<":"<<*i<<std::endl;
+    //             }
+    //         }
 
-            // TODO: implement exception handling
-            if(errorStatus != MPI_SUCCESS)
-            {
-                std::cerr << "Error in MPI_Allgatherv during retrieval of global list of selected particles" << std::endl;
-                MPI_Abort(ar->comm(), errorStatus);
-            }
+    //         // TODO: implement exception handling
+    //         if(errorStatus != MPI_SUCCESS)
+    //         {
+    //             std::cerr << "Error in MPI_Allgatherv during retrieval of global list of selected particles" << std::endl;
+    //             MPI_Abort(ar->comm(), errorStatus);
+    //         }
 
-            // Store the global list of selected particles as attribute
-            if(numberOfTotalSelectedParticles>0) {
-                ar->stepAttribute("selectedParticlesIds", globalSelectedParticlesIds.data(), globalSelectedParticlesIds.size());
-            }
-        }
-    };
+    //         // Store the global list of selected particles as attribute
+    //         if(numberOfTotalSelectedParticles>0) {
+    //             ar->stepAttribute("selectedParticlesIds", globalSelectedParticlesIds.data(), globalSelectedParticlesIds.size());
+    //         }
+    //     }
+    // };
 
     //! @brief buffer growth factor when reallocating
     float allocGrowthRate_{1.05};
