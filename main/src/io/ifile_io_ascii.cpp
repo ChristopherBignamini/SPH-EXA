@@ -57,7 +57,6 @@ public:
 
     [[nodiscard]] int rank() const override { return rank_; }
     [[nodiscard]] int numRanks() const override { return numRanks_; }
-    [[nodiscard]] MPI_Comm comm() const override { return comm_; }
 
     std::string suffix() const override { return ""; }
 

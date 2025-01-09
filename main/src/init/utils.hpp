@@ -151,8 +151,6 @@ public:
     }
 
     [[nodiscard]] static int rank() { return -1; }
-    [[nodiscard]] int numRanks() const { return -1; }
-    [[nodiscard]] MPI_Comm comm() const { return MPI_COMM_NULL; }
 
     void stepAttribute(const std::string& key, FieldType val, int64_t /*size*/)
     {
