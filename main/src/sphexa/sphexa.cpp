@@ -184,25 +184,21 @@ int main(int argc, char** argv)
             observables->computeAndWrite(simData, domain.startIndex(), domain.endIndex(), box);
         }
 
-        if (saveSelParticles) {
+        if (tagSelectedParticles) {
 
-            // Reset the list of indexes of subdomain selected particles: this is needed since a specific particle can move to another rank 
-            localSelectedParticlesIndexes.clear();
-
+            if (rank == 0) { std::cout << "Execution of selected particle identification\n"; }
             // TODO: Check if selected particle tagging is needed:
             // in a simulation starting from scratch we need to tag the selected particles if saveSelParticles is true and only in first iteration.
             // In a simulation starting from a checkpoint file we need to tag the selected particles only if they are not already tagged? 
             // Implementation of a check for tag existence in a checkpoint file is currently missing.
-            if(tagSelectedParticles){
-                // Find the selected particles in local id list and tag them by setting the MSB of the id field
-                std::for_each(selParticlesIds.begin(), selParticlesIds.end(), [&idList = d.id, &localSelectedParticlesIndexes, rank](auto selParticleId){
-                    const auto selParticleIndex = std::find(idList.begin(), idList.end(), selParticleId) - idList.begin();
-                    if (selParticleIndex < idList.size()) {
-                        localSelectedParticlesIndexes.push_back(selParticleIndex);
-                        idList[selParticleIndex] = idList[selParticleIndex] | msbMask;
-                    }
-                });
-            }
+            // Find the selected particles in local id list and tag them by setting the MSB of the id field
+            std::for_each(selParticlesIds.begin(), selParticlesIds.end(), [&idList = d.id](auto selParticleId){
+                const auto selParticleIndex = std::find(idList.begin(), idList.end(), selParticleId) - idList.begin();
+                if (selParticleIndex < idList.size()) {
+                    idList[selParticleIndex] = idList[selParticleIndex] | msbMask;
+                }
+            });
+
             tagSelectedParticles = false;
         }
 
@@ -227,12 +223,27 @@ int main(int argc, char** argv)
 
         if (isSelectedParticleOutputTriggered) // && propatagor->isSynced
         {
+            // TODO: what about MPI task sync at this point? I'm assuming everything is synced...
+            // Reset the list of indexes of subdomain selected particles: this is needed since a specific particle can move to another rank
+            localSelectedParticlesIndexes.clear();
+
+            // Find the selected particles in local id list and save their indexes
+            unsigned int particleIndex = 0;
+            std::for_each(d.id.begin(), d.id.end(), [&localSelectedParticlesIndexes, &particleIndex](auto& particleId){
+                if((particleId & msbMask) != 0) {// check MSB
+                    localSelectedParticlesIndexes.push_back(particleIndex); // TODO: inefficient due to resizing, avoid push_back usage
+                }
+                particleIndex++;
+            });
+
+
             selParticlesFileWriter->addStep(0, localSelectedParticlesIndexes.size(), selParticlesOutFile);
             simData.hydro.loadOrStoreAttributes(selParticlesFileWriter.get());
             box.loadOrStore(selParticlesFileWriter.get());
             propagator->saveSelParticlesFields(selParticlesFileWriter.get(), domain.startIndex(), domain.endIndex(), localSelectedParticlesIndexes, simData.hydro);
             selParticlesFileWriter->closeStep();
-            isSelectedParticleOutputTriggered = false;
+//            isSelectedParticleOutputTriggered = false;
+
         }
 
         if (isOutputStep(d.iteration, profFreqStr) || isOutputTime(d.ttot - d.minDt, d.ttot, profFreqStr) ||
