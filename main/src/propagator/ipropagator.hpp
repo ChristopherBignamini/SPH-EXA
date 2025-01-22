@@ -226,7 +226,6 @@ protected:
         // });
 
         // TODO: check existence of code duplication with outputAllocatedFields
-        // TODO: here we assume that selected particles is the last field in the dataset
         for (int i = int(indicesDone.size()) - 1; i >= 0; --i)
         {
             int fidx = indicesDone[i];
@@ -261,6 +260,59 @@ protected:
             }
         }    
     }
+
+    // // TODO: last parameter should be const& but at some point we use the data() method which is non-const
+    // static void outputSelParticlesAllocatedFieldsNew(IFileWriter* writer, size_t first, size_t last, ParticleDataType::HydroData& hydroSimData)
+    // {
+    //     auto fieldPointers = hydroSimData.data();
+    //     auto indicesDone   = hydroSimData.outputFieldIndices;
+    //     auto namesDone     = hydroSimData.outputFieldNames;
+
+    //     // // Locally untag the selected particles to print the right ID
+    //     // // TODO: it can probably be done with templates
+    //     // constexpr uint64_t msbMask = static_cast<uint64_t>(1) << (sizeof(uint64_t)*8 - 1);
+    //     // std::vector<uint64_t> localSelectedParticlesIds = {};
+    //     // std::for_each(selectedParticlesPositions.begin(), selectedParticlesPositions.end(), [&hydroSimData, &localSelectedParticlesIds](auto particlePosition){
+    //     //     localSelectedParticlesIds.push_back(hydroSimData.id[particlePosition] & ~msbMask);
+    //     // });
+
+    //     const ParticleIndexVectorType& selectedParticlesPositions;
+
+    //     // TODO: check existence of code duplication with outputAllocatedFields
+    //     for (int i = int(indicesDone.size()) - 1; i >= 0; --i)
+    //     {
+    //         int fidx = indicesDone[i];
+    //         if (hydroSimData.isAllocated(fidx))
+    //         {
+    //             int column = std::find(hydroSimData.outputFieldIndices.begin(), hydroSimData.outputFieldIndices.end(), fidx) -
+    //                                    hydroSimData.outputFieldIndices.begin();
+
+    //             // TODO: the call frequency of this and of the outputAllocatedFields method will be different, 
+    //             // we can save transfer time with a status flag but it will be the current method the one that 
+    //             // will be called more frequently and which will be responsible for the data transfer.
+    //             // TODO: should we just transfer a minimal subset of particles including the selected ones?
+    //             transferToHost(hydroSimData, first, last, {hydroSimData.fieldNames[fidx]});
+
+
+    //             // Copy current field data to a new vector only for the selected particles
+    //             std::visit([writer, c = column, key = namesDone[i], &selectedParticlesPositions](auto field){
+    //                 std::remove_pointer_t<decltype(field)> selectedParticleFieldValues;
+    //                 // TODO: use copy_if
+    //                 // std::copy_if(field->begin(), field->end(), std::back_inserter(selectedParticleFieldPointers),
+    //                 //     [](){return true;});
+    //                 std::for_each(selectedParticlesPositions.begin(), selectedParticlesPositions.end(),
+    //                     [&selectedParticleFieldValues, &field](auto particlePosition){
+    //                         selectedParticleFieldValues.push_back(field->at(particlePosition));
+    //                     });
+    //                 writer->writeField(key, selectedParticleFieldValues.data(), c); 
+    //             },
+    //             fieldPointers[fidx]);             
+
+    //             indicesDone.erase(indicesDone.begin() + i);
+    //             namesDone.erase(namesDone.begin() + i);
+    //         }
+    //     }    
+    // }
 
     std::ostream& out;
     Timer         timer;
