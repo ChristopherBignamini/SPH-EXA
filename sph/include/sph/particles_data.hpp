@@ -366,20 +366,20 @@ public:
 
     float getAllocGrowthRate() const { return allocGrowthRate_; }
 
-    //! @brief Set/Unset the MSB of the id field to indentify the selected particles
-    using ParticleIdType = decltype(id)::value_type;
-    static constexpr ParticleIdType msbMask = static_cast<ParticleIdType>(1) << (sizeof(ParticleIdType)*8 - 1);
-    void flagSelectedParticles(auto localSelectedParticlePositions, bool flag = true) {
-        std::for_each(localSelectedParticlePositions.begin(), localSelectedParticlePositions.end(),
-            [&id = this->id, flag](auto selParticleIndex){
-            if(flag) {
-                id[selParticleIndex] = id[selParticleIndex] | msbMask;
-            }
-            else {
-                id[selParticleIndex] = id[selParticleIndex] & ~msbMask;
-            }
-        });
-    }
+    // //! @brief Set/Unset the MSB of the id field to indentify the selected particles
+    // using ParticleIdType = decltype(id)::value_type;
+    // static constexpr ParticleIdType msbMask = static_cast<ParticleIdType>(1) << (sizeof(ParticleIdType)*8 - 1);
+    // void flagSelectedParticles(auto localSelectedParticlePositions, bool flag = true) {
+    //     std::for_each(localSelectedParticlePositions.begin(), localSelectedParticlePositions.end(),
+    //         [&id = this->id, flag](auto selParticleIndex){
+    //         if(flag) {
+    //             id[selParticleIndex] = id[selParticleIndex] | msbMask;
+    //         }
+    //         else {
+    //             id[selParticleIndex] = id[selParticleIndex] & ~msbMask;
+    //         }
+    //     });
+    // }
 
 
 private:
