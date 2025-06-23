@@ -41,6 +41,7 @@
 #include "sph/particles_data.hpp"
 #include "util/pm_reader.hpp"
 #include "util/timer.hpp"
+#include <chrono>
 
 namespace sphexa
 {
@@ -88,10 +89,18 @@ public:
         // Find the selected particles positions in dataset
         ParticleIndexVectorType selectedParticlesIndexes;
         if constexpr (cstone::HaveGpu<typename ParticleDataType::AcceleratorType>{}) {
+            auto start = std::chrono::high_resolution_clock::now();
             findTaggedIds(simData.hydro.devData.id, first, last, selectedParticlesIndexes);
+            auto stop = std::chrono::high_resolution_clock::now();
+            auto duration = std::chrono::duration_cast<std::chrono::microseconds>(stop - start);
+            std::cout << duration.count() << " microseconds (GPU)" << std::endl;
         }
         else {
+            auto start = std::chrono::high_resolution_clock::now();
             findTaggedIds(simData.hydro.id, first, last, selectedParticlesIndexes);
+            auto stop = std::chrono::high_resolution_clock::now();
+            auto duration = std::chrono::duration_cast<std::chrono::microseconds>(stop - start);
+            std::cout << duration.count() << " microseconds (CPU)" << std::endl;
         }
         writer->addStep(0, selectedParticlesIndexes.size(), selParticlesOutFile);
         simData.hydro.loadOrStoreAttributes(writer);
