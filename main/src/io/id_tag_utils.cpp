@@ -40,6 +40,14 @@
 namespace sphexa
 {
 
+void applyTaggingMask(IdType groupId, IdType& id)
+{
+    if (groupId >= supGroupId) return; // TODO: throw error?
+
+    IdType shiftedGroupId = (groupId+1) << taggingMaskStartingBit;
+    id |= shiftedGroupId;
+}
+
 /*! @brief Id tagging (in first:last range) from list, CPU version
  *
  * @param[out] ids          ordered id list
@@ -47,16 +55,17 @@ namespace sphexa
  * @param[in]  last         last (excluded) id index
  * @param[in]  selectedIds  indexes to be tagged
  */
-void tagIdsInList(IdVectorType& ids, size_t first, size_t last, const IdVectorType& selectedIds)
+void tagIdsInList(IdVectorType& ids,  size_t first, size_t last, const IdVectorType& selectedIds, const IdType groupId)
 {
     const auto idListBeginIt = ids.begin()+first;
     const auto idListEndIt = ids.begin()+last;
     auto lastFound = 0;
-    std::for_each(selectedIds.begin(), selectedIds.end(), [idListBeginIt, idListEndIt, &lastFound](auto selectedIds){
+    std::for_each(selectedIds.begin(), selectedIds.end(), [idListBeginIt, idListEndIt, &lastFound, groupId](auto selectedIds){
         auto lower = std::lower_bound(idListBeginIt+lastFound, idListEndIt, selectedIds);
         if(lower != idListEndIt && *lower == selectedIds) {
             lastFound = lower - idListBeginIt + 1;
-            *lower = *lower | msbMask;
+//            *lower = *lower | msbMask;
+            applyTaggingMask(groupId, *lower);
         }
     });
 }
@@ -73,15 +82,18 @@ void tagIdsInList(IdVectorType& ids, size_t first, size_t last, const IdVectorTy
  * @param[in]  selSphereData      spherical volume definition
  */
 void tagIdsInSphere(IdVectorType& ids, const std::vector<CoordinateType>& x, const std::vector<CoordinateType>& y,
-    const std::vector<CoordinateType>& z, size_t firstIndex, size_t lastIndex, const IdSelectionSphere& selSphereData)
+    const std::vector<CoordinateType>& z, size_t firstIndex, size_t lastIndex, const IdSelectionSphere& selSphereData,
+    const IdType groupId)
 {
+    std::cout<<"Tagging in sphere: center = ("<<selSphereData.center[0]<<","<<selSphereData.center[1]<<","<<selSphereData.center[2]
+        <<"), radius = "<<selSphereData.radius<<", groupId = "<<groupId<<std::endl;
     const auto squareRadius = selSphereData.radius*selSphereData.radius;
 #pragma omp parallel for schedule(static)
     for(auto particleIndex = firstIndex; particleIndex < lastIndex; particleIndex++){
         cstone::Vec3<CoordinateType> currentPosition{x[particleIndex], y[particleIndex], z[particleIndex]};
         auto squaredDistance = util::norm2(currentPosition - selSphereData.center);
         if(squaredDistance < squareRadius) {
-            ids[particleIndex] = ids[particleIndex] | msbMask;
+            applyTaggingMask(groupId, ids[particleIndex]);
         }
     }
 }
@@ -217,7 +229,8 @@ void findTaggedIds(const IdVectorType& ids, size_t first, size_t last, IdVectorT
         #pragma omp critical
         taggedIdsIndexes.insert(taggedIdsIndexes.end(), tmpTaggedIdsIndexes.begin(), tmpTaggedIdsIndexes.end());
     }
-    std::sort(std::execution::par, taggedIdsIndexes.begin(), taggedIdsIndexes.end());
+//    std::sort(std::execution::par, taggedIdsIndexes.begin(), taggedIdsIndexes.end());
+    std::sort(taggedIdsIndexes.begin(), taggedIdsIndexes.end()); // TODO: use parallel execution, this version is needed on MacOS
 }
 #endif
 

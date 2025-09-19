@@ -54,7 +54,7 @@ public:
 
     virtual const InitSettings& constants() const = 0;
 
-    const IdSubsets& subsets() const  { return idSubsets_; }
+    const IdSelections& idSelections() const  { return idSelections_; }
 
     virtual ~ISimInitializer() = default;
 
@@ -69,26 +69,50 @@ protected:
     */
     void initSubsets(const InitSettings& settings, bool printLog, Dataset::HydroData& particlesData, int initStep = 0) const
     {
+        IdType groupIdCounter = 0;
         auto idSelectionSphereRadius = settings.find("id_selection_sphere_radius");
         if(idSelectionSphereRadius != settings.end()) {
             if(printLog) { std::cout << "Execution of id subset tagging in sphere" << std::endl; }
-            initSubsets(IdSelectionSphere{std::get<ScalarValue>(settings.at("id_selection_sphere_center_x").getValue()),
-                std::get<ScalarValue>(settings.at("id_selection_sphere_center_y").getValue()), std::get<ScalarValue>(settings.at("id_selection_sphere_center_z").getValue()),
-                std::get<ScalarValue>(idSelectionSphereRadius->second.getValue())}, initStep,
-                particlesData.x, particlesData.y, particlesData.z, particlesData.id);
+            if(idSelectionSphereRadius->second.isFVector()) {
+                for(auto s = 0; s < std::get<FVectorValue>(idSelectionSphereRadius->second.getValue()).size(); ++s) {
+                    initSubset(
+                        IdSelectionSphere{std::get<FVectorValue>(settings.at("id_selection_sphere_center_x").getValue())[s],
+                            std::get<FVectorValue>(settings.at("id_selection_sphere_center_y").getValue())[s],
+                            std::get<FVectorValue>(settings.at("id_selection_sphere_center_z").getValue())[s],
+                            std::get<FVectorValue>(idSelectionSphereRadius->second.getValue())[s]},
+                        groupIdCounter, initStep, particlesData.x, particlesData.y, particlesData.z, particlesData.id);
+                        ++groupIdCounter;
+                }
+            }
+            else {
+                initSubset(
+                    IdSelectionSphere{std::get<ScalarValue>(settings.at("id_selection_sphere_center_x").getValue()),
+                        std::get<ScalarValue>(settings.at("id_selection_sphere_center_y").getValue()), 
+                        std::get<ScalarValue>(settings.at("id_selection_sphere_center_z").getValue()),
+                        std::get<ScalarValue>(idSelectionSphereRadius->second.getValue())}, 
+                    groupIdCounter, initStep, particlesData.x, particlesData.y, particlesData.z, particlesData.id);
+                    ++groupIdCounter;
+            }
         }
         auto idSelectionList = settings.find("id_selection_list");
         if(idSelectionList != settings.end()) {
             if(printLog) { std::cout << "Execution of id subset tagging in list" << std::endl; }
-            if(idSelectionList->second.isVector()) {
-                initSubsets(std::get<VectorValue>(idSelectionList->second.getValue()),
-                initStep, particlesData.id);
+            if(idSelectionList->second.isVVector()) {
+                for(auto s = 0; s < std::get<VVectorValue>(idSelectionList->second.getValue()).size(); ++s) {
+                    initSubset(std::get<VVectorValue>(idSelectionList->second.getValue())[s], groupIdCounter, initStep, particlesData.id);
+                    ++groupIdCounter;
+                }
+            }
+            else if(idSelectionList->second.isVector()) {
+                initSubset(std::get<VectorValue>(idSelectionList->second.getValue()), groupIdCounter, initStep, particlesData.id);
+                ++groupIdCounter;
             }
             else {
-                initSubsets(IdVectorType{IdType(std::get<ScalarValue>(idSelectionList->second.getValue()))},
-                initStep, particlesData.id);
+                initSubset(IdVectorType{IdType(std::get<ScalarValue>(idSelectionList->second.getValue()))}, groupIdCounter, initStep, particlesData.id);
+                ++groupIdCounter;
             }
         }
+        // TODO: add check to avoid multiple spherical/list selections or code to deal with that. 
         // TODO: if we only want the subset selection attributes in the subset file, I can delete them from settings_ here, after subset initialization.
         // If that is the case, do not forgot to call Base::resetConstants(settings_): maybe it's not needed in the simulation but it will keep the settings_
         // consistent along the inheritance hierachy
@@ -97,34 +121,42 @@ protected:
     /*! @brief Id tagging in spherical volume
     *
     * @param[in]  selSphereData    spherical volume definition
+    * @param[in]  groupId          selection group id
     * @param[in]  initStep         time step at which selection is done
     * @param[in]  x                x coordinates
     * @param[in]  y                y coordinates
     * @param[in]  z                z coordinates
     * @param[out] ids              id list from hydro data
     */
-    void initSubsets(const IdSelectionSphere& selSphereData, int initStep, const std::vector<CoordinateType>& x,
+    void initSubset(const IdSelectionSphere& selSphereData, IdType groupId, int initStep, const std::vector<CoordinateType>& x,
         const std::vector<CoordinateType>& y, const std::vector<CoordinateType>& z, IdVectorType& ids) const
     {
-        tagIdsInSphere(ids, x, y, z, 0, ids.size(), selSphereData);
+        tagIdsInSphere(ids, x, y, z, 0, ids.size(), selSphereData, groupId);
 
-        idSubsets_["id_selection_sphere"] = IdSelectionSettings{selSphereData, initStep};
+//        idSubsets_["id_selection_spheres"] = IdSelectionSettings{selSphereData, initStep};
+        idSelections_.spheres.addSphere(selSphereData.center[0], selSphereData.center[1], selSphereData.center[2],
+            selSphereData.radius, groupId, initStep);
+//        idSubsets_.push_back(IdSelectionSettings{selSphereData, initStep});
     }
 
     /*! @brief Id tagging from list
     *
     * @param[in]  selectedIds    ids to be tagged
+    * @param[in]  groupId          selection group id
     * @param[in]  initStep       time step at which selection is done
     * @param[out] ids            id list from hydro data
     */
-    void initSubsets(const IdVectorType& selectedIds, int initStep, IdVectorType& ids) const
+    void initSubset(const IdVectorType& selectedIds, IdType groupId, int initStep, IdVectorType& ids) const
     {
-        tagIdsInList(ids, 0, ids.size(), selectedIds);
+        tagIdsInList(ids, 0, ids.size(), selectedIds, groupId);
 
-        idSubsets_["id_selection_list"] = IdSelectionSettings{selectedIds, initStep};
+//        idSubsets_["id_selection_lists"] = IdSelectionSettings{selectedIds, initStep};
+        // idSubsets_.push_back(IdSelectionSettings{selectedIds, initStep});
+        idSelections_.lists.addList(selectedIds, groupId, initStep);
     }
 
-    mutable IdSubsets idSubsets_;
+//    mutable IdSubsets idSubsets_;
+    mutable IdSelections idSelections_;
 
 };
 

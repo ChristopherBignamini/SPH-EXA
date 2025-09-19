@@ -47,9 +47,29 @@ using IdType = uint64_t;//decltype(std::declval<ParticlesData<cstone::CpuTag>>()
 using IdVectorType = std::vector<IdType>;//decltype(std::declval<ParticlesData<cstone::CpuTag>>().id);
 using CoordinateType = sph::SphTypes::CoordinateType;
 
+const IdType taggingMaskSize = 10; // Number of bit used for tagging information storage TODO: find a more readable way to define this constant
+const IdType taggingMaskStartingBit = sizeof(IdType)*8 - taggingMaskSize;
+const IdType supGroupId = (1 << taggingMaskSize) - 1; // Maximum selection group id value
+const IdType taggingCheckMask = supGroupId << taggingMaskStartingBit;
+
 /*! @brief Tagging mask definition (most significant bit flip)
  */
 constexpr IdType msbMask = static_cast<IdType>(1) << (sizeof(IdType)*8 - 1);
+
+void applyTaggingMask(const IdType selectionId, IdType& id);
+
+// /*! @brief Tagged id identification condition functor
+//  */
+// struct MaskFunctor
+// {
+// #if defined(__CUDACC__) || defined(__HIPCC__)
+//     __device__
+// #endif
+//     IdType operator()(IdType id) const
+//     {
+//         return (id & msbMask) != 0;
+//     }
+// };
 
 /*! @brief Tagged id identification condition functor
  */
@@ -58,11 +78,12 @@ struct MaskFunctor
 #if defined(__CUDACC__) || defined(__HIPCC__)
     __device__
 #endif
-    IdType operator()(IdType id) const
+    IdType operator()(IdType id) const // TODO: change name to TaggingCheckFunctor //TODO: change return type to bool
     {
-        return (id & msbMask) != 0;
+        return (id & taggingCheckMask) != 0;
     }
 };
+
 
 /*! @brief Tagged id (in first:last range) identification, CPU version
  *
@@ -88,8 +109,9 @@ void findTaggedIds(const cstone::DeviceVector<IdType>& ids, size_t first, size_t
  * @param[in]  first             first id index // TODO number of elements and pass iterator?
  * @param[in]  last              last (excluded) id index
  * @param[in]  selectedIds       indexes to be tagged
+ * @param[in]  groupId           selection group id
  */
-void tagIdsInList(IdVectorType& ids, size_t first, size_t last, const IdVectorType& selectedIds);
+void tagIdsInList(IdVectorType& ids, size_t first, size_t last, const IdVectorType& selectedIds, const IdType groupId = 0);
 
 /*! @brief Id tagging (in first:last range) from list, GPU version
  *
@@ -97,8 +119,9 @@ void tagIdsInList(IdVectorType& ids, size_t first, size_t last, const IdVectorTy
  * @param[in]  first             first id index // TODO number of elements and pass iterator?
  * @param[in]  last              last (excluded) id index
  * @param[in]  selectedIds       indexes to be tagged
+ * @param[in]  groupId           selection group id
  */
-void tagIdsInList(cstone::DeviceVector<IdType>& ids, size_t first, size_t last, const IdVectorType& selectedIds);
+void tagIdsInList(cstone::DeviceVector<IdType>& ids, size_t first, size_t last, const IdVectorType& selectedIds, const IdType groupId = 0);
 
 
 // Id tagging types selection
@@ -109,10 +132,57 @@ struct IdSelectionSphere
     cstone::Vec3<CoordinateType> center;
     CoordinateType radius;
 };
+
+struct IdSelectionBase
+{
+    std::vector<IdType> group_id;
+    std::vector<int>  step;
+};
+struct IdSelectionSpheres : public IdSelectionBase
+{
+    void addSphere(CoordinateType x, CoordinateType y, CoordinateType z, CoordinateType r, IdType groupId, int initStep)
+    {
+        center_x.push_back(x);
+        center_y.push_back(y);
+        center_z.push_back(z);
+        radius.push_back(r);
+        group_id.push_back(groupId);
+        step.push_back(initStep);
+    }
+
+    std::vector<CoordinateType> center_x;
+    std::vector<CoordinateType> center_y;
+    std::vector<CoordinateType> center_z;
+    std::vector<CoordinateType> radius;
+};
 /*! @brief Id tagging list definition
  */
-using IdSelectionList = IdVectorType;
+struct IdSelectionLists : public IdSelectionBase
+{
+    void addList(const IdVectorType& list, IdType groupId, int initStep)
+    {
+        // TODO: implement support for multiple lists
+        if(lists.size() > 0) {
+            std::cout<<"WARNING: handling of multiple lists for particle tagging not supported yet, only the first one will be considered."<<std::endl;
+            return;
+        }
+        
+        lists.push_back(list);
+        group_id.push_back(groupId);
+        step.push_back(initStep);
+    }
 
+    std::vector<IdVectorType> lists;
+};
+//using IdSelectionList = IdVectorType;
+struct IdSelections
+{
+    IdSelectionLists   lists;
+    IdSelectionSpheres spheres;
+
+    bool hasLists()   const { return !lists.lists.empty(); }
+    bool hasSpheres() const { return !spheres.radius.empty(); }
+};
 
 /*! @brief Id tagging (in first:last range) in spherical volume, CPU version
  *
@@ -123,9 +193,11 @@ using IdSelectionList = IdVectorType;
  * @param[in]  first             first id index // TODO number of elements and pass iterator?
  * @param[in]  last              last (excluded) id index
  * @param[in]  selSphereData     spherical volume definition
+ * @param[in]  groupId           selection group id
  */
 void tagIdsInSphere(IdVectorType& ids, const std::vector<CoordinateType>& x, const std::vector<CoordinateType>& y,
-    const std::vector<CoordinateType>& z, size_t firstIndex, size_t lastIndex, const IdSelectionSphere& selSphereData);
+    const std::vector<CoordinateType>& z, size_t firstIndex, size_t lastIndex, const IdSelectionSphere& selSphereData, 
+    const IdType groupId = 0);
 
 /*! @brief Id tagging (in first:last range) in spherical volume, GPU version
  *
@@ -136,8 +208,10 @@ void tagIdsInSphere(IdVectorType& ids, const std::vector<CoordinateType>& x, con
  * @param[in]  first             first id index // TODO number of elements and pass iterator?
  * @param[in]  last              last (excluded) id index
  * @param[in]  selSphereData     spherical volume definition
+ * @param[in]  groupId           selection group id
  */
 void tagIdsInSphere(cstone::DeviceVector<IdType>& ids, const std::vector<CoordinateType>& x, const std::vector<CoordinateType>& y,
-    const std::vector<CoordinateType>& z, size_t firstIndex, size_t lastIndex, const IdSelectionSphere& selSphereData);
+    const std::vector<CoordinateType>& z, size_t firstIndex, size_t lastIndex, const IdSelectionSphere& selSphereData, 
+    const IdType groupId = 0);
 
 }

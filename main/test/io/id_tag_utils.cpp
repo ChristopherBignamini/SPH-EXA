@@ -38,48 +38,73 @@
 
 //TODO: create tagged id list, it will be used in multiple tests
 
+TEST(IO, applyTaggingMask)
+{
+    sphexa::IdType id = 1;
+    sphexa::IdType idRef = 18014398509481985ULL;
+    sphexa::IdType selectionId = 0;
+    sphexa::applyTaggingMask(selectionId, id);
+    EXPECT_EQ(id, idRef);
+
+    id = 3;
+    idRef = 54043195528445955ULL; 
+    selectionId = 2;
+    sphexa::applyTaggingMask(selectionId, id);
+    EXPECT_EQ(id, idRef);
+
+    id = 0;
+    idRef = 18428729675200069632ULL; 
+    selectionId = sphexa::supGroupId - 1;
+    sphexa::applyTaggingMask(selectionId, id);
+    EXPECT_EQ(id, idRef);
+
+    // // Check that applying the tagging mask twice does not change the id
+    // for(auto& id : ids) {
+    //     sphexa::applyTaggingMask(1, id);
+    // }
+    // EXPECT_EQ(ids, taggedIdsRef);
+}
 
 TEST(IO, tagIdInList)
 {
-    const uint64_t first = 3;
-    const uint64_t last = 10;
-    std::vector<uint64_t> ids(100);
+    // Full ids tagging check
+    std::vector<sphexa::IdType> ids(100);
     std::iota(std::begin(ids), std::end(ids), 0);
-    std::vector<uint64_t> selectedIds{0, 1, 2, 3, 6, 11, 13, 23, 71, 83, 91, 95, 99};
-    std::vector<uint64_t> tagIdsRef = ids;
-    tagIdsRef[0] = 9223372036854775808ULL;
-    tagIdsRef[1] = 9223372036854775809ULL;
-    tagIdsRef[2] = 9223372036854775810ULL;
-    tagIdsRef[3] = 9223372036854775811ULL;
-    tagIdsRef[6] = 9223372036854775814ULL;
-    tagIdsRef[11] = 9223372036854775819ULL;
-    tagIdsRef[13] = 9223372036854775821ULL;
-    tagIdsRef[23] = 9223372036854775831ULL;
-    tagIdsRef[71] = 9223372036854775879ULL;
-    tagIdsRef[83] = 9223372036854775891ULL;
-    tagIdsRef[91] = 9223372036854775899ULL;
-    tagIdsRef[95] = 9223372036854775903ULL;
-    tagIdsRef[99] = 9223372036854775907ULL;
+    std::vector<sphexa::IdType> selectedIds{0, 1, 2, 3, 6, 11, 13, 23, 71, 83, 91, 95, 99};
+    std::vector<sphexa::IdType> tagIdsRef = ids;
+    tagIdsRef[0] = 18014398509481984ULL;
+    tagIdsRef[1] = 18014398509481985ULL;
+    tagIdsRef[2] = 18014398509481986ULL;
+    tagIdsRef[3] = 18014398509481987ULL;
+    tagIdsRef[6] = 18014398509481990ULL;
+    tagIdsRef[11] = 18014398509481995ULL;
+    tagIdsRef[13] = 18014398509481997ULL;
+    tagIdsRef[23] = 18014398509482007ULL;
+    tagIdsRef[71] = 18014398509482055ULL;
+    tagIdsRef[83] = 18014398509482067ULL;
+    tagIdsRef[91] = 18014398509482075ULL;
+    tagIdsRef[95] = 18014398509482079ULL;
+    tagIdsRef[99] = 18014398509482083ULL;
 
     sphexa::tagIdsInList(ids, 0, ids.size(), selectedIds);
     EXPECT_EQ(ids, tagIdsRef);
 
+    // Reset ids and reference ids for subset tagging check
     std::iota(std::begin(ids), std::end(ids), 0);
     tagIdsRef = ids;
-    tagIdsRef[3] = 9223372036854775811ULL;
-    tagIdsRef[6] = 9223372036854775814ULL;
+    tagIdsRef[3] = 18428729675200069635ULL;
+    tagIdsRef[6] = 18428729675200069638ULL;
 
-    sphexa::tagIdsInList(ids, first, last, selectedIds);
+    // Tagging in subset, with group specification
+    const uint64_t first = 3;
+    const uint64_t last = 10;
+    sphexa::IdType groupId = sphexa::supGroupId - 1;
+    sphexa::tagIdsInList(ids, first, last, selectedIds, groupId);
     EXPECT_EQ(ids, tagIdsRef);
 }
 
 TEST(IO, tagIdInSphere)
 {
-    const uint64_t first = 400;
-    const uint64_t last = 500;
-    std::vector<uint64_t> ids(1000);
-    std::iota(std::begin(ids), std::end(ids), 0);
-
     // Particle distribution creation
     std::vector<sphexa::CoordinateType> x(1000);
     std::vector<sphexa::CoordinateType> y(1000);
@@ -105,12 +130,18 @@ TEST(IO, tagIdInSphere)
     selSphereData.center[1] = 0.0;
     selSphereData.center[2] = 0.0;
 
+    // Full range tagging, with group specification
+    std::vector<uint64_t> ids(1000);
+    std::iota(std::begin(ids), std::end(ids), 0);
     std::vector<uint64_t> taggedIdxRef{444, 445, 454, 455, 544, 545, 554, 555};
     std::vector<uint64_t> taggedIdx;
-    sphexa::tagIdsInSphere(ids, x, y, z, 0, ids.size(), selSphereData);
+    sphexa::tagIdsInSphere(ids, x, y, z, 0, ids.size(), selSphereData, 3);
     sphexa::findTaggedIds(ids, 0, ids.size(), taggedIdx);
     EXPECT_EQ(taggedIdx, taggedIdxRef);
 
+    // Tagging in subset
+    const uint64_t first = 400;
+    const uint64_t last = 500;
     taggedIdxRef = {444, 445, 454, 455};
     std::iota(std::begin(ids), std::end(ids), 0);
     taggedIdx.clear();

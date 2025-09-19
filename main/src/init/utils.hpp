@@ -103,8 +103,8 @@ void readFileAttributes(InitSettings& settings, const std::string& settingsFile,
                 settings[attr] = ScalarValue{};
                 reader->fileAttribute(attr, &std::get<ScalarValue>(settings[attr].getValue()), sz);
             } else {
-                settings[attr] = VectorValue(sz);
-                reader->fileAttribute(attr, std::get<VectorValue>(settings[attr].getValue()).data(), sz);
+                settings[attr] = FVectorValue(sz);
+                reader->fileAttribute(attr, std::get<FVectorValue>(settings[attr].getValue()).data(), sz);
             }
             if (reader->rank() == 0 && verbose)
             {
@@ -116,8 +116,8 @@ void readFileAttributes(InitSettings& settings, const std::string& settingsFile,
                     }
                     else {
                         std::cout << "Override setting from " << settingsFile << ": " << attr << " = "
-                            << std::get<VectorValue>(settings[attr].getValue())[0] <<",...,"
-                            << std::get<VectorValue>(settings[attr].getValue())[sz-1] <<std::endl;
+                            << std::get<FVectorValue>(settings[attr].getValue())[0] <<",...,"
+                            << std::get<FVectorValue>(settings[attr].getValue())[sz-1] <<std::endl;
                     }
                 }
                 else
@@ -128,8 +128,8 @@ void readFileAttributes(InitSettings& settings, const std::string& settingsFile,
                     }
                     else {
                         std::cout << "Setting from " << settingsFile << ": " << attr << " = "
-                            << std::get<VectorValue>(settings[attr].getValue())[0] <<",...,"
-                            << std::get<VectorValue>(settings[attr].getValue())[sz-1] << " not recognized " << std::endl;
+                            << std::get<FVectorValue>(settings[attr].getValue())[0] <<",...,"
+                            << std::get<FVectorValue>(settings[attr].getValue())[sz-1] << " not recognized " << std::endl;
                     }
                 }
             }
