@@ -23,10 +23,11 @@
  */
 
 /*! @file
- * @brief Radiative cooling tests with GRACKLE
+ * @brief Radiative cooling tests
  *
  * @author Noah Kubli <noah.kubli@uzh.ch>
  * @author Sebastian Keller <sebastian.f.keller@gmail.com>
+ * @author Christopher Bignamini <christopher.bignamini@gmail.com>
  */
 
 #include <iostream>
@@ -39,10 +40,48 @@
 using namespace cooling;
 using cstone::get;
 
-TEST(ChemistryData, test1a)
+/*! @brief Minimal cooling back-end for testing ChemistryData's layout and accessors
+ *
+ */
+struct StubCooler
+{
+    using CoolingFields = util::FieldList<"a_fraction", "b_fraction", "c_fraction">;
+};
+
+//! @brief the field layout follows the cooler passed in, not a hardcoded list
+TEST(ChemistryData, stubCoolerBackend)
+{
+    using T = double;
+    ChemistryData<T, StubCooler> data;
+
+    static_assert(ChemistryData<T, StubCooler>::numFields == 3);
+    EXPECT_STREQ(data.fieldNames[0], "a_fraction");
+    EXPECT_STREQ(data.fieldNames[1], "b_fraction");
+    EXPECT_STREQ(data.fieldNames[2], "c_fraction");
+
+    // activate a subset at runtime, affects next resize
+    data.setConserved(0, 2);
+
+    size_t dataSize = 10;
+    data.resize(dataSize);
+
+    EXPECT_EQ(data.fields[0].size(), dataSize);
+    EXPECT_EQ(data.fields[2].size(), dataSize);
+    EXPECT_EQ(data.fields[1].size(), 0);
+
+    // fields can also be accessed based on the back-end's names
+    EXPECT_EQ(get<"c_fraction">(data).data(), data.fields[2].data());
+}
+
+//! @brief the default back-end is GRACKLE, so existing usages keep their field layout
+TEST(ChemistryData, defaultCoolingBackend)
 {
     using T = double;
     ChemistryData<T> data;
+
+    static_assert(std::is_same_v<ChemistryData<double>, ChemistryData<double, GrackleCooler<double>>>);
+    EXPECT_EQ(ChemistryData<double>::numFields, 21u);
+    EXPECT_STREQ(ChemistryData<double>::fieldNames[0], "HI_fraction");
 
     // activate some of the fields at runtime, affects next resize
     data.setConserved(0, 1, 9);
