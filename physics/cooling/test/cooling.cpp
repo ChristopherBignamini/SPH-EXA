@@ -4,9 +4,9 @@
 #include <cmath>
 #include "gtest/gtest.h"
 
-#include "cooling/cooler.hpp"
+#include "cooling/grackle_cooler.hpp"
 #include "cooling/chemistry_data.hpp"
-#include "cooling/cooler_impl.hpp"
+#include "cooling/grackle_cooler_impl.hpp"
 #include "cooling/cooler_task.hpp"
 
 #include "cstone/fields/field_get.hpp"
@@ -32,7 +32,7 @@ TEST(cooling_grackle, testCoolParticles)
 
     const Real mass_unit = std::pow(length_units, 3.0) * density_units / MSOLG;
 
-    cooling::Cooler<Real> cd;
+    cooling::GrackleCooler<Real> cd;
 
     std::map<std::string, double> grackleOptions;
     grackleOptions["cooling::m_code_in_ms"]           = mass_unit;
@@ -114,7 +114,7 @@ TEST(cooling_grackle2, test2)
     const std::string writePath{"sphexa_cooling_test.txt"};
 
     using Real = double;
-    cooling::Cooler<Real>         cd;
+    cooling::GrackleCooler<Real>         cd;
     std::map<std::string, double> grackleOptions;
     grackleOptions["cooling::m_code_in_ms"]           = 1e16;
     grackleOptions["cooling::l_code_in_kpc"]          = 46400;
@@ -214,9 +214,9 @@ static bool checkVectorDifferences(const auto& vec1, const auto& vec2, const dou
     return true;
 }
 
-struct CoolerDataTest : public ::testing::Test, cooling::Cooler<double>::Impl
+struct CoolerDataTest : public ::testing::Test, cooling::GrackleCooler<double>::Impl
 {
-    using CoolingFields = cooling::Cooler<double>::CoolingFields;
+    using CoolingFields = cooling::GrackleCooler<double>::CoolingFields;
 
     cooling::ChemistryData<double> chemistry;
     cooling::ChemistryData<double> chemistry_copy;
@@ -235,7 +235,7 @@ struct CoolerDataTest : public ::testing::Test, cooling::Cooler<double>::Impl
     void SetUp() override
     {
         std::apply([this](auto... f) { chemistry.setConserved(f.value...); },
-                   make_tuple(cooling::Cooler<double>::CoolingFields{}));
+                   make_tuple(cooling::GrackleCooler<double>::CoolingFields{}));
 
         chemistry.resize(data_size);
         rho.resize(data_size);
