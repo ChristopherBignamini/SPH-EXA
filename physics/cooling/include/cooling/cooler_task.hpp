@@ -1,14 +1,11 @@
 //
 // Created by Noah Kubli on 30.11.2023.
+// Updated by Christopher Bignamini on 21.08.2026.
 //
 
 #pragma once
 
-#include <algorithm>
-
-#include "cooler.hpp"
-#include "cstone/util/tuple_util.hpp"
-#include "cstone/fields/field_get.hpp"
+#include <cstddef>
 
 namespace cooling
 {
