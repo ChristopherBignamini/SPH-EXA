@@ -1,5 +1,5 @@
 find_package(OpenMP)
-add_library(cooler cooler.cpp)
+add_library(cooler grackle_cooler.cpp)
 target_include_directories(cooler PRIVATE ${CSTONE_DIR} ${COOLING_DIR})
 target_link_libraries(cooler PRIVATE grackle OpenMP::OpenMP_CXX)
 target_compile_definitions(cooler PUBLIC SPH_EXA_HAVE_GRACKLE)
