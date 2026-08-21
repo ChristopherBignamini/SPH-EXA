@@ -31,7 +31,7 @@
 #pragma once
 
 #include "evrard_init.hpp"
-#include "cooling/cooler.hpp"
+#include "cooling/grackle_cooler.hpp"
 #include "cooling/init_chemistry.h"
 
 namespace sphexa
