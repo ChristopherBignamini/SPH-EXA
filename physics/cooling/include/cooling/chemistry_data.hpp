@@ -23,10 +23,11 @@
  */
 
 /*! @file
- * @brief Unit tests for ParticlesData
+ * @brief Contains the object holding all particle chemistry data
  *
  * @author Noah Kubli <noah.kubli@uzh.ch>
  * @author Sebastian Keller <sebastian.f.keller@gmail.com>
+ * @author Christopher Bignamini <christopher.bignamini@gmail.com>
  */
 #pragma once
 
@@ -38,13 +39,18 @@
 #include "cstone/fields/field_get.hpp"
 #include "cstone/util/reallocate.hpp"
 
-#include "cooling/cooler.hpp"
+#include "cooling/grackle_cooler.hpp"
 
 namespace cooling
 {
 
-template<class T>
-class ChemistryData : public cstone::FieldStates<ChemistryData<T>>
+/*! @brief Chemistry/cooling state as a separate SoA dataset, one entry per particle
+ *
+ * @tparam T        floating point type of the per-particle fields
+ * @tparam CoolerT  the cooling back-end; only its @a CoolingFields member is used, default is the Grackle cooler
+ */
+template<class T, class CoolerT = GrackleCooler<T>>
+class ChemistryData : public cstone::FieldStates<ChemistryData<T, CoolerT>>
 {
 public:
     template<class ValueType>
@@ -54,8 +60,8 @@ public:
     using FieldVariant =
         std::variant<FieldVector<float>*, FieldVector<double>*, FieldVector<unsigned>*, FieldVector<uint64_t>*>;
 
-    //! Grackle field names
-    inline static constexpr auto   fieldNames = make_array(typename Cooler<RealType>::CoolingFields{});
+    //! @brief field names of the selected cooling back-end
+    inline static constexpr auto   fieldNames = make_array(typename CoolerT::CoolingFields{});
     inline static constexpr size_t numFields  = fieldNames.size();
 
     std::array<FieldVector<T>, numFields> fields;
