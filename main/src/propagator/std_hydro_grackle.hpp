@@ -38,7 +38,7 @@
 #include "sph/particles_data.hpp"
 #include "sph/sph.hpp"
 
-#include "cooling/cooler.hpp"
+#include "cooling/grackle_cooler.hpp"
 #include "cooling/eos_cooling.hpp"
 
 #include "std_hydro.hpp"
@@ -61,7 +61,7 @@ class HydroGrackleProp final : public HydroProp<DomainType, DataType>
     using KeyType  = typename DataType::KeyType;
     using ChemData = typename DataType::ChemData;
 
-    cooling::Cooler<T> cooling_data;
+    cooling::GrackleCooler<T> cooling_data;
 
     /*! @brief the list of conserved particles fields with values preserved between iterations
      *
@@ -74,7 +74,7 @@ class HydroGrackleProp final : public HydroProp<DomainType, DataType>
         FieldList<"rho", "p", "c", "ax", "ay", "az", "du", "c11", "c12", "c13", "c22", "c23", "c33", "nc">;
 
     //! @brief All fields listed in Chemistry data are used. This could be overridden with a sublist if desired
-    using CoolingFields = typename cooling::Cooler<T>::CoolingFields;
+    using CoolingFields = typename cooling::GrackleCooler<T>::CoolingFields;
 
 public:
     HydroGrackleProp(std::ostream& output, size_t rank, const InitSettings& settings)
