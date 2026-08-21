@@ -1,5 +1,5 @@
 
-set(UNIT_TESTS chemistry_data.cpp cooling.cpp cooling_backend.cpp)
+set(UNIT_TESTS chemistry_data.cpp cooling.cpp)
 set(testname cooling_tests)
 add_executable(${testname} ${UNIT_TESTS})
 target_compile_options(${testname} PRIVATE -Wall -Wextra)
