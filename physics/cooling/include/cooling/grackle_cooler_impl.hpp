@@ -4,6 +4,7 @@
 
 #pragma once
 
+#include "code_units.hpp"
 #include "grackle_cooler.hpp"
 #include "grackle_cooler_field_data_arr.hpp"
 #include "cooler_task.hpp"
@@ -55,16 +56,8 @@ private:
     //! @brief Number of particles that are passed simultaneously to Grackle
     inline constexpr static size_t blockSize = 1000;
 
-    //! @brief Solar mass in g
-    inline constexpr static T ms_g = 1.989e33;
-    //! @brief kpc in cm
-    inline constexpr static T kp_cm = 3.086e21;
-    //! @brief Gravitational constant in cgs units
-    inline constexpr static T G_newton = 6.674e-8;
-    //! @brief code unit mass in solar masses
-    T m_code_in_ms = 1e16;
-    //! @brief code unit length in kpc
-    T l_code_in_kpc = 46400.;
+    //! @brief tunable code unit mass and length, see code_units.hpp
+    CodeUnitScales scales_;
     //! @brief Path to Grackle data file
     std::string grackle_data_file_path = dataFilePath();
 
@@ -103,7 +96,7 @@ private:
     {
         auto& d   = global_values.data;
         auto  ret = std::tie(
-             m_code_in_ms, l_code_in_kpc, d.use_grackle, d.with_radiative_cooling, d.primordial_chemistry,
+             scales_.m_code_in_ms, scales_.l_code_in_kpc, d.use_grackle, d.with_radiative_cooling, d.primordial_chemistry,
              d.dust_chemistry, d.metal_cooling, d.UVbackground,
              //!
              //! d.char *grackle_data_file,
@@ -151,26 +144,19 @@ private:
     {
         grackle_verbose = 1;
 
-        // Density
-        const double density_unit = m_code_in_ms * ms_g / std::pow(l_code_in_kpc * kp_cm, 3);
-        // Time
-        const double time_unit = time_unit_opt.value_or(std::sqrt(1. / (density_unit * G_newton)));
-        // Length
-        const double length_unit = l_code_in_kpc * kp_cm;
-        // Velocity
-        const double velocity_unit = length_unit / time_unit;
+        const CodeUnits units = makeCodeUnits(scales_, time_unit_opt);
 
-        global_values.units.density_units        = density_unit; // m_sun / (pc * pc * pc);
-        global_values.units.time_units           = time_unit;    // code_time;
-        global_values.units.length_units         = length_unit;  // pc;
-        global_values.units.velocity_units       = velocity_unit;
+        global_values.units.density_units        = units.density;
+        global_values.units.time_units           = units.time;
+        global_values.units.length_units         = units.length;
+        global_values.units.velocity_units       = units.velocity;
         global_values.units.a_units              = 1.0;
         global_values.units.a_value              = 1.0;
         global_values.units.comoving_coordinates = comoving_coordinates ? 1 : 0;
 
 #ifndef NDEBUG
         std::cout << "debug\n";
-        std::cout << m_code_in_ms << "\t" << ms_g << "\t" << l_code_in_kpc << "\n";
+        std::cout << scales_.m_code_in_ms << "\t" << solarMassInGrams << "\t" << scales_.l_code_in_kpc << "\n";
         std::cout << "code units\n";
         std::cout << global_values.units.density_units << "\t" << global_values.units.time_units << "\t"
                   << global_values.units.length_units << "\n";
