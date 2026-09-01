@@ -8,7 +8,7 @@
  */
 
 /*! @file
- * @brief Calls to ChaNGa's native COOLING_COSMO back-end for radiative cooling
+ * @brief Adaptor to ChaNGa native COOLING_COSMO back-end for radiative cooling
  *
  * @author Christopher Bignamini <christopher.bignamini@gmail.com>
  * @author Sebastian Keller <sebastian.f.keller@gmail.com>
