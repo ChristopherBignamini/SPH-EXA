@@ -78,8 +78,8 @@ public:
     //! @brief Init GrackleCooler. Must be called before any other function is used and after parameters are set
     void init(bool comoving_coordinates = false, std::optional<T> time_unit = std::nullopt);
 
-    //! @brief Calls the GRACKLE library to integrate the cooling and chemistry fields. Writes internal energy
-    //! differential to du
+    //! @brief Calls the GRACKLE library to integrate the cooling and chemistry fields.
+    //! Accumlates the resulting energy rate, (u_new - u_old)/dt, onto du.
     template<typename Trho, typename Tu>
     void cool_particles(T dt, const Trho* rho, const Tu* u, const GrackleFieldPtrs& chemistry, Tu* du, size_t first,
                         size_t last);
