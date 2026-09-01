@@ -34,13 +34,25 @@ namespace cooling
  * Not checked: every back-end must also provide
  * template<class Archive> void loadOrStoreAttributes(Archive*), taking the archives from
  * main/src/io -- requiring it here would make physics/cooling depend on the I/O layer.
+ *
+ * TODO (comoving): there is no time/redshift reference in the contract, and neither back-end
+ * supports a changing redshift in current implementation.
+ *
+ *   - ChangaCosmoCooler calls ChaNGa's CoolSetTime(z) once in init() and rejects
+ *     comoving=true.
+ *   - GrackleCooler sets code_units.a_value = 1.0 in init() and never updates it. GRACKLE
+ *     derives the redshift itself, z = 1/(a_value*a_units) - 1 and needs the a_value
+ *     to be refreshed before each cool_particles.
+ *
+ * So the two would need different strategies: an explicit setTime(t, z) for ChaNGa, a writable
+ * expansion factor for GRACKLE. A single contract member could serve both -- setTime(t, z)
+ * with the GRACKLE implementation writing a_value = 1/(1+z).
  */
 template<class C, class Trho = float, class Tu = double, class Tout = float>
 concept CoolingBackend =
     // the field list drives ChemistryData, the domain sync and the file output
     requires {
         typename C::CoolingFields;
-        //! @brief the tuple of field pointers cool_particles & co. are called with
         typename C::FieldPtrs;
     } &&
     std::default_initializable<C> &&
