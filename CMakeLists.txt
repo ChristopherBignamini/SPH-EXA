@@ -101,8 +101,13 @@ if (SPH_EXA_WITH_H5HUT)
       set(SPH_EXA_WITH_H5HUT OFF)
     endif ()
 endif ()
+option(SPH_EXA_WITH_GRACKLE "Enable the Grackle cooling back-end" OFF)
 if (SPH_EXA_WITH_GRACKLE)
     add_subdirectory(extern/grackle)
+endif()
+option(SPH_EXA_WITH_CHANGA_COOLING "Enable the ChaNGa cooling back-end" OFF)
+if (SPH_EXA_WITH_CHANGA_COOLING)
+    add_subdirectory(extern/changa_cooling)
 endif()
 
 # reset CMAKE_COMPILE_WARNING_AS_ERROR to original value for main SPH-EXA build
