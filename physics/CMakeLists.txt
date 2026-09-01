@@ -1,5 +1,5 @@
 
-if (SPH_EXA_WITH_GRACKLE)
+if (SPH_EXA_WITH_GRACKLE OR SPH_EXA_WITH_CHANGA_COOLING)
     add_subdirectory(cooling)
 endif ()
 if (SPH_EXA_WITH_DISKS)
