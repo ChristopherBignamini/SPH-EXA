@@ -9,7 +9,7 @@ function(enableDiskPhysics exename link_gpu)
     endif ()
 endfunction()
 
-set(PROP_SOURCES nbody.cpp std_hydro_grackle.cpp std_hydro.cpp ve_hydro.cpp ve_hydro_bdt.cpp)
+set(PROP_SOURCES nbody.cpp std_hydro_grackle.cpp std_hydro_changa.cpp std_hydro.cpp ve_hydro.cpp ve_hydro_bdt.cpp)
 
 add_library(propagator ${PROP_SOURCES})
 target_include_directories(propagator PRIVATE ${PROJECT_SOURCE_DIR}/main/src ${COOLING_DIR} ${CSTONE_DIR}
@@ -18,6 +18,7 @@ target_include_directories(propagator PRIVATE ${PROJECT_SOURCE_DIR}/main/src ${C
 target_link_libraries(propagator PRIVATE ${MPI_CXX_LIBRARIES} util OpenMP::OpenMP_CXX)
 enableDiskPhysics(propagator FALSE)
 enableGrackle(propagator)
+enableChangaCooling(propagator)
 
 if (SPH_EXA_WITH_CUDA OR SPH_EXA_WITH_HIP)
     add_library(propagator_gpu ${PROP_SOURCES})
@@ -27,6 +28,7 @@ if (SPH_EXA_WITH_CUDA OR SPH_EXA_WITH_HIP)
     target_link_libraries(propagator_gpu PRIVATE ${MPI_CXX_LIBRARIES} cstone_gpu ryoanji sph_gpu util OpenMP::OpenMP_CXX)
     enableDiskPhysics(propagator_gpu TRUE)
     enableGrackle(propagator_gpu)
+    enableChangaCooling(propagator_gpu)
 endif ()
 
 if (SPH_EXA_WITH_CUDA)

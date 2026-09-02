@@ -55,6 +55,12 @@ propagatorFactory(const std::string& choice, bool avClean, std::ostream& output,
         return PropLib<DomainType, ParticleDataType>::makeHydroGrackleProp(output, rank, s);
     }
 #endif
+#ifdef SPH_EXA_HAVE_CHANGA_COOLING
+    if (choice == "std-changa-cooling")
+    {
+        return PropLib<DomainType, ParticleDataType>::makeHydroChangaProp(output, rank, s);
+    }
+#endif
     if (choice == "nbody") { return PropLib<DomainType, ParticleDataType>::makeNbodyProp(output, rank); }
     if (choice == "turbulence")
     {
