@@ -101,14 +101,29 @@ if (SPH_EXA_WITH_H5HUT)
       set(SPH_EXA_WITH_H5HUT OFF)
     endif ()
 endif ()
-option(SPH_EXA_WITH_GRACKLE "Enable the Grackle cooling back-end" OFF)
-if (SPH_EXA_WITH_GRACKLE)
+# Radiative cooling back-end selector: none, grackle or changa
+set(SPH_EXA_COOLING "none" CACHE STRING "Radiative cooling back-end: none, grackle or changa")
+set_property(CACHE SPH_EXA_COOLING PROPERTY STRINGS none grackle changa)
+
+# TODO: update cooling backend selection in ci/cd
+if (SPH_EXA_WITH_GRACKLE AND SPH_EXA_COOLING STREQUAL "none")
+    set(SPH_EXA_COOLING "grackle")
+endif()
+
+set(SPH_EXA_WITH_GRACKLE OFF)
+set(SPH_EXA_WITH_CHANGA_COOLING OFF)
+
+if (SPH_EXA_COOLING STREQUAL "grackle")
+    set(SPH_EXA_WITH_GRACKLE ON)
     add_subdirectory(extern/grackle)
-endif()
-option(SPH_EXA_WITH_CHANGA_COOLING "Enable the ChaNGa cooling back-end" OFF)
-if (SPH_EXA_WITH_CHANGA_COOLING)
+elseif (SPH_EXA_COOLING STREQUAL "changa")
+    set(SPH_EXA_WITH_CHANGA_COOLING ON)
     add_subdirectory(extern/changa_cooling)
+elseif (NOT SPH_EXA_COOLING STREQUAL "none")
+    message(FATAL_ERROR "SPH_EXA_COOLING must be one of: none, grackle, changa "
+                        "(got '${SPH_EXA_COOLING}')")
 endif()
+message(STATUS "Cooling back-end: ${SPH_EXA_COOLING}")
 
 # reset CMAKE_COMPILE_WARNING_AS_ERROR to original value for main SPH-EXA build
 set(CMAKE_COMPILE_WARNING_AS_ERROR ${SPH_EXA_WARNING_AS_ERROR})
