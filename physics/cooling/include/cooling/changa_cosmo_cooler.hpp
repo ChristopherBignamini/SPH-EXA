@@ -112,7 +112,7 @@ public:
         {
             std::visit([&](auto* location) { optionalIO(std::string(parameterNames[i]), location, 1); }, parameters[i]);
         }
-        optionalIO("cooling::ct_crit", &ct_crit, 1);
+        optionalIO("ct_crit", &ct_crit, 1);
     }
 
     struct Impl;
