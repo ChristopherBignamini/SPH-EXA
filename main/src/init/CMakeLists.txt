@@ -13,6 +13,7 @@ endfunction()
 
 enableTDEInit(sim_init)
 enableGrackle(sim_init)
+enableChangaCooling(sim_init)
 
 if (SPH_EXA_WITH_CUDA OR SPH_EXA_WITH_HIP)
     add_library(sim_init_gpu sim_init.cpp)
@@ -21,6 +22,7 @@ if (SPH_EXA_WITH_CUDA OR SPH_EXA_WITH_HIP)
             ${SPH_DIR} ${MPI_CXX_INCLUDE_PATH} ${DISK_DIR})
     target_link_libraries(sim_init_gpu PRIVATE ${MPI_CXX_LIBRARIES} OpenMP::OpenMP_CXX)
     enableGrackle(sim_init_gpu)
+    enableChangaCooling(sim_init_gpu)
     enableTDEInit(sim_init_gpu)
 endif ()
 

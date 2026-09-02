@@ -44,6 +44,9 @@
 #ifdef SPH_EXA_HAVE_GRACKLE
 #include "evrard_cooling_init.hpp"
 #endif
+#ifdef SPH_EXA_HAVE_CHANGA_COOLING
+#include "evrard_changa_cooling_init.hpp"
+#endif
 #ifdef SPH_EXA_HAVE_TDE_INIT
 #include "polytrope_init.hpp"
 #include "tde_orbit_init.hpp"
@@ -72,6 +75,23 @@ std::unique_ptr<ISimInitializer<Dataset>>
 SimInitializers<Dataset>::makeEvrardCooling(std::string /*glass*/, std::string /*settingsFile*/, IFileReader*)
 {
     throw std::runtime_error("Missing GRACKLE build option for evrard-cooling\n");
+    return nullptr;
+}
+#endif
+
+#ifdef SPH_EXA_HAVE_CHANGA_COOLING
+template<class Dataset>
+std::unique_ptr<ISimInitializer<Dataset>>
+SimInitializers<Dataset>::makeEvrardChangaCooling(std::string glassBlock, std::string settingsFile, IFileReader* reader)
+{
+    return std::make_unique<EvrardGlassSphereChangaCooling<Dataset>>(glassBlock, settingsFile, reader);
+}
+#else
+template<class Dataset>
+std::unique_ptr<ISimInitializer<Dataset>>
+SimInitializers<Dataset>::makeEvrardChangaCooling(std::string /*glass*/, std::string /*settingsFile*/, IFileReader*)
+{
+    throw std::runtime_error("Missing ChaNGa cooling build option for evrard-changa-cooling\n");
     return nullptr;
 }
 #endif
