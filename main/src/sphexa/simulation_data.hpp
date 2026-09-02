@@ -33,6 +33,12 @@
 #include <mpi.h>
 
 #include "cooling/chemistry_data.hpp"
+#ifdef SPH_EXA_HAVE_GRACKLE
+#include "cooling/grackle_cooler.hpp"
+#endif
+#ifdef SPH_EXA_HAVE_CHANGA_COOLING
+#include "cooling/changa_cosmo_cooler.hpp"
+#endif
 #include "sph/particles_data.hpp"
 
 namespace sphexa
@@ -48,7 +54,16 @@ public:
     using RealType = sph::SphTypes::CoordinateType;
 
     using HydroData = ParticlesData<Exec>;
-    using ChemData  = cooling::ChemistryData<RealType>;
+
+    /* TODO (no-cooler): with SPH_EXA_COOLING=none neither flag is set, so this falls to the
+     * GRACKLE branch and a build with no cooling still carries GRACKLE's 21-field chemistry
+     * dataset. Implement a NoCooler with an empty CoolingFields list.
+     */
+#ifdef SPH_EXA_HAVE_CHANGA_COOLING
+    using ChemData  = cooling::ChemistryData<RealType, cooling::ChangaCosmoCooler<RealType>>;
+#else
+    using ChemData  = cooling::ChemistryData<RealType, cooling::GrackleCooler<RealType>>;
+#endif
 
     //! @brief spacially distributed data for hydrodynamics and gravity
     HydroData hydro;
