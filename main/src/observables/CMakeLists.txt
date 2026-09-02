@@ -20,12 +20,17 @@ target_include_directories(observables PRIVATE ${PROJECT_SOURCE_DIR}/main/src ${
         ${MPI_CXX_INCLUDE_PATH} ${DISK_DIR})
 target_link_libraries(observables PRIVATE ${MPI_CXX_LIBRARIES} OpenMP::OpenMP_CXX)
 
+enableGrackle(observables)
+enableChangaCooling(observables)
+
 if (SPH_EXA_WITH_CUDA OR SPH_EXA_WITH_HIP)
     add_library(observables_gpu $<TARGET_OBJECTS:obs_gpu> observables.cpp)
     target_compile_definitions(observables_gpu PRIVATE USE_CUDA)
     target_include_directories(observables_gpu PRIVATE ${PROJECT_SOURCE_DIR}/main/src ${COOLING_DIR} ${CSTONE_DIR}
             ${SPH_DIR} ${MPI_CXX_INCLUDE_PATH})
     target_link_libraries(observables_gpu PRIVATE ${MPI_CXX_LIBRARIES} OpenMP::OpenMP_CXX)
+    enableGrackle(observables_gpu)
+    enableChangaCooling(observables_gpu)
 endif()
 
 if(SPH_EXA_WITH_CUDA)

@@ -5,6 +5,7 @@ target_link_libraries(${exename} PRIVATE io sim_init propagator observables viz 
 target_include_directories(${exename} PRIVATE ${PROJECT_SOURCE_DIR}/physics/cooling/include/)
 
 enableGrackle(${exename})
+enableChangaCooling(${exename})
 
 install(TARGETS ${exename} RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 
@@ -16,6 +17,7 @@ if (SPH_EXA_WITH_CUDA)
     target_link_libraries(${exename}-cuda PRIVATE ryoanji sph_gpu io viz sim_init_gpu propagator_gpu observables_gpu OpenMP::OpenMP_CXX
             ${MPI_CXX_LIBRARIES} CUDA::cudart)
     enableGrackle(${exename}-cuda)
+    enableChangaCooling(${exename}-cuda)
     install(TARGETS ${exename}-cuda RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 
 elseif (SPH_EXA_WITH_HIP)
@@ -26,5 +28,6 @@ elseif (SPH_EXA_WITH_HIP)
             ${MPI_CXX_LIBRARIES} hip::host)
     set_target_properties(${exename}-hip PROPERTIES LINKER_LANGUAGE CXX)
     enableGrackle(${exename}-hip)
+    enableChangaCooling(${exename}-hip)
     install(TARGETS ${exename}-hip RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 endif ()
