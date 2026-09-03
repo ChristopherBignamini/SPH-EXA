@@ -69,7 +69,13 @@ public:
                                    domain.focusTree(), domain.layout().data(), multipoles_.data());
     }
 
-    void traverse(cstone::GroupView /*grp*/, DataType& d, const DomainType& domain)
+    void traverse(cstone::GroupView grp, DataType& d, const DomainType& domain)
+    {
+        traverse(grp, d, domain, d.ax.data(), d.ay.data(), d.az.data());
+    }
+
+    //! @brief accumulate gravitational acceleration into the caller-provided ax/ay/az arrays
+    void traverse(cstone::GroupView /*grp*/, DataType& d, const DomainType& domain, Ta* ax, Ta* ay, Ta* az)
     {
         //! includes tree plus associated information, like peer ranks, assignment, counts, centers, etc
         const auto& focusTree = domain.focusTree();
@@ -84,15 +90,13 @@ public:
         ryoanji::computeGravity(octree.childOffsets, octree.parents, octree.internalToLeaf,
                                 focusTree.expansionCentersAcc().data(), multipoles_.data(), domain.layout().data(),
                                 domain.startCell(), domain.endCell(), d.x.data(), d.y.data(), d.z.data(), d.h.data(),
-                                d.m.data(), domain.box(), d.g, d.ugrav.data(), d.ax.data(), d.ay.data(), d.az.data(),
-                                &d.egrav, numShells);
+                                d.m.data(), domain.box(), d.g, d.ugrav.data(), ax, ay, az, &d.egrav, numShells);
 
         if (usePbc)
         {
             ryoanji::computeGravityEwald(makeVec3(focusTree.expansionCentersAcc()[0]), multipoles_.front(),
                                          domain.startIndex(), domain.endIndex(), d.x.data(), d.y.data(), d.z.data(),
-                                         d.m.data(), box, d.g, d.ugrav.data(), d.ax.data(), d.ay.data(), d.az.data(),
-                                         &d.egrav, ewaldSettings_);
+                                         d.m.data(), box, d.g, d.ugrav.data(), ax, ay, az, &d.egrav, ewaldSettings_);
         }
     }
 
@@ -134,6 +138,12 @@ public:
 
     void traverse(cstone::GroupView grp, DataType& d, const DomainType& domain)
     {
+        traverse(grp, d, domain, rawPtr(d.ax), rawPtr(d.ay), rawPtr(d.az));
+    }
+
+    //! @brief accumulate gravitational acceleration into the caller-provided ax/ay/az arrays
+    void traverse(cstone::GroupView grp, DataType& d, const DomainType& domain, Ta* ax, Ta* ay, Ta* az)
+    {
         using namespace cstone;
 
         const auto& box       = domain.box();
@@ -141,7 +151,7 @@ public:
         int         numShells = usePbc ? ewaldSettings_.numReplicaShells : 0;
 
         d.egrav = mHolder_.compute(grp, rawPtr(d.x), rawPtr(d.y), rawPtr(d.z), rawPtr(d.m), rawPtr(d.h), d.g, numShells,
-                                   domain.box(), rawPtr(d.ugrav), rawPtr(d.ax), rawPtr(d.ay), rawPtr(d.az));
+                                   domain.box(), rawPtr(d.ugrav), ax, ay, az);
 
         auto stats = mHolder_.readStats();
 
@@ -158,8 +168,7 @@ public:
             syncGpu(execution::gpuDefaultStream);
 
             computeGravityEwaldGpu(makeVec3(rootCenter), rootM, grp, rawPtr(d.x), rawPtr(d.y), rawPtr(d.z), rawPtr(d.m),
-                                   box, d.g, rawPtr(d.ugrav), rawPtr(d.ax), rawPtr(d.ay), rawPtr(d.az), &d.egrav,
-                                   ewaldSettings_);
+                                   box, d.g, rawPtr(d.ugrav), ax, ay, az, &d.egrav, ewaldSettings_);
         }
 
         d.stackUsedGravity = stats[4];
