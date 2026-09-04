@@ -33,6 +33,8 @@
 
 #pragma once
 
+#include <memory>
+
 #include "cstone/fields/field_get.hpp"
 #include "sph/particles_data.hpp"
 #include "sph/sph.hpp"
@@ -40,6 +42,7 @@
 
 #include "ipropagator.hpp"
 #include "gravity_wrapper.hpp"
+#include "cosmology.hpp"
 
 namespace sphexa
 {
@@ -82,10 +85,42 @@ protected:
      * aNow_ = a(t_n), aPrevHalf_ = a(t_n - dt_m1/2), aHalf_ = a(t_n + dt/2), aNext_ = a(t_n+1). aNow_ is the
      * one the acceleration weights are derived from, the others drive the drift and the velocity output.
      *
-     * TODO: all pinned to one, which makes the integrator identical to the non-comoving one. Wire these
-     * up to the cosmology / scale-factor state once that is available.
+     * They are recomputed once per step in integrate() from cosmo_, so that all four derive from a single
+     * a(t). Keeping them derived rather than independently settable is what guarantees the alignment
+     * aPrevHalf(step n+1) == aHalf(step n), on which the exact momentum conservation of the integrator
+     * rests.
      */
     T aNow_{1}, aPrevHalf_{1}, aHalf_{1}, aNext_{1};
+
+    //! @brief scale factor evolution, never null, the static universe when the settings carry no cosmology
+    std::unique_ptr<ScaleFactorEvolution> cosmo_;
+
+    //! @brief true until the first call to updateScaleFactors, which has no previous step to carry over
+    bool firstStep_{true};
+
+
+    /*! @brief compute the scale factors of the current step
+     *
+     * TODO: check if the following condition is correct
+     * Must be called after computeTimestep, which has already advanced d.ttot to the end of the step and
+     * updated d.minDt / d.minDt_m1. The start of the current step is therefore d.ttot - d.minDt.
+     *
+     * aPrevHalf_ is carried over from the previous step's aHalf_ rather than recomputed. The two denote the
+     * same instant, but reaching it as (ttot - dt) + dt/2 on one step and as ttot - dt_m1/2 on the next
+     * rounds differently, and sph::positionUpdateComoving conserves the canonical momentum exactly under
+     * the condition that the scale factor that divided the drift is bitwise the one that multiplies
+     * the momentum recovery. Carrying the value over makes that identity hold by construction.
+     */
+    void updateScaleFactors(double ttot, double dt, double dt_m1)
+    {
+        double tn = ttot - dt;
+
+        aPrevHalf_ = firstStep_ ? T(cosmo_->a(tn - 0.5 * dt_m1)) : aHalf_;
+        aNow_      = cosmo_->a(tn);
+        aHalf_     = cosmo_->a(tn + 0.5 * dt);
+        aNext_     = cosmo_->a(tn + dt);
+        firstStep_ = false;
+    }
 
     /*! @brief the list of conserved particles fields with values preserved between iterations
      *
@@ -104,11 +139,25 @@ protected:
     using DependentFields =
         std::conditional_t<avClean, decltype(DependentFields_{} + GradVFields{}), decltype(DependentFields_{})>;
 
+    const InitSettings& settings_;
+
 public:
-    HydroVeComovingProp(std::ostream& output, size_t rank)
+    HydroVeComovingProp(std::ostream& output, size_t rank, const InitSettings& settings)
         : Base(output, rank)
+        , cosmo_(makeScaleFactorEvolution(settings))
+        , settings_(settings)
     {
         if (avClean && rank == 0) { std::cout << "AV cleaning is activated" << std::endl; }
+
+        if (rank == 0)
+        {
+            if (settings.count(cosmoH0Key) == 0) { std::cout << "No cosmology, the scale factor stays at one\n"; }
+            else
+            {
+                std::cout << "Cosmology: H0 = " << settings.at(cosmoH0Key) << ", omegaM = "
+                          << settings.at(cosmoOmegaMKey) << ", aStart = " << settings.at(cosmoAStartKey) << std::endl;
+            }
+        }
     }
 
     std::vector<std::string> conservedFields() const override
@@ -201,6 +250,7 @@ public:
 
         release(d, "divv", "gradh");
         acquire(d, "ay", "az");
+        // TODO (energy): check energy calculation in the comoving case.
         computeMomentumEnergy<avClean>(groups_.view(), nullptr, d, domain.box());
         timer.step("MomentumAndEnergy");
         pmReader.step();
@@ -234,6 +284,7 @@ public:
         size_t last  = domain.endIndex();
 
         computeTimestep(first, last, d);
+        updateScaleFactors(d.ttot, d.minDt, d.minDt_m1);
         timer.step("Timestep");
         //! gravity is stored in a separate acceleration set; pass it (or nullptr) to the combining integrator
         const HydroType* agx = d.g != 0.0 ? cstone::rawPtr(agx_) : nullptr;

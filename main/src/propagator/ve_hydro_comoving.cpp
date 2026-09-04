@@ -39,10 +39,10 @@ namespace sphexa
 
 template<class DomainType, class ParticleDataType>
 std::unique_ptr<Propagator<DomainType, ParticleDataType>>
-PropLib<DomainType, ParticleDataType>::makeHydroVeComovingProp(std::ostream& output, size_t rank, bool avClean)
+PropLib<DomainType, ParticleDataType>::makeHydroVeComovingProp(std::ostream& output, size_t rank, const InitSettings& s, bool avClean)
 {
-    if (avClean) { return std::make_unique<HydroVeComovingProp<true, DomainType, ParticleDataType>>(output, rank); }
-    else { return std::make_unique<HydroVeComovingProp<false, DomainType, ParticleDataType>>(output, rank); }
+    if (avClean) { return std::make_unique<HydroVeComovingProp<true, DomainType, ParticleDataType>>(output, rank, s); }
+    else { return std::make_unique<HydroVeComovingProp<false, DomainType, ParticleDataType>>(output, rank, s); }
 }
 
 #ifdef USE_CUDA

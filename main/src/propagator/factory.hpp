@@ -46,7 +46,7 @@ propagatorFactory(const std::string& choice, bool avClean, std::ostream& output,
     if (choice == "ve") { return PropLib<DomainType, ParticleDataType>::makeHydroVeProp(output, rank, avClean); }
     if (choice == "ve-comoving")
     {
-        return PropLib<DomainType, ParticleDataType>::makeHydroVeComovingProp(output, rank, avClean);
+        return PropLib<DomainType, ParticleDataType>::makeHydroVeComovingProp(output, rank, s, avClean);
     }
     if (choice == "ve-bdt")
     {
