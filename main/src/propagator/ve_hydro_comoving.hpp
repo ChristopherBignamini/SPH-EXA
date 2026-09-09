@@ -193,6 +193,31 @@ public:
         d.treeView = domain.octreeProperties();
     }
 
+    /*! @brief Rescale the internal comoving energy rate d.du by 1/aNow, according to the comoving description of system evolution
+     *
+     * TODO (energy scaling): this is a temporary solution to correct the energy variation calculated by SPH-EXA in
+     * physical coordinates in order to be consistent with the switch to comoving variables (position, density, etc...)
+     * In a future implementation we could think of a more clean solution.
+     *
+     * NOTE: this is called from computeForces, where d.ttot is still the time the state belongs to: computeTimestep has
+     * not yet run, so this is the same t_n that integrate() derives as d.ttot - d.minDt, and therefore the
+     * same scale factor that updateScaleFactors will store in aNow_.
+     *
+     * NOTE: by including the expansion factor in the description, a Hubble dragging term given by -3*H*(gamma-1)*u
+     * is introduced in the energy equation. That term is a cooling contribution purely due to the expansion itself and
+     * can be "removed" by switchig to the comoving internal energy u_c = u* a^(3*(gamma-1)). This means that the internal
+     * energy of the HydroData structure is assumed to be the comoving one.
+     */
+    void scaleInternalEnergyRate(DomainType& domain, typename DataType::HydroData& d, size_t first, size_t last)
+    {
+        double aNow = cosmo_->a(d.ttot);
+        // exact for the static universe, and a no-op at the present epoch of a real one
+        if (aNow == 1.0) { return; }
+
+        auto* du = cstone::rawPtr(d.du);
+        cstone::scale(domain.exec(), du + first, du + last, du + first, 1.0 / aNow);
+    }
+
     void computeForces(DomainType& domain, DataType& simData) override
     {
         timer.start();
@@ -250,8 +275,8 @@ public:
 
         release(d, "divv", "gradh");
         acquire(d, "ay", "az");
-        // TODO (energy): check energy calculation in the comoving case.
         computeMomentumEnergy<avClean>(groups_.view(), nullptr, d, domain.box());
+        scaleInternalEnergyRate(domain, d, first, last);
         timer.step("MomentumAndEnergy");
         pmReader.step();
 
