@@ -75,7 +75,7 @@ __global__ void computePositionsComovingKernel(GroupView grp, float dt,
 
     // combination point: total acceleration = hydro + gravity with comoving scale-factor weights
     // scale-factor weights of the two acceleration sets, see sph::updatePositionsComovingHost
-    Tc wHydro = Tc(1);
+    Tc wHydro = std::pow(aNow, Tc(-3) * (gamma - Tc(1)));
     Tc wGrav  = Tc(1) / aNow;
 
     Ta ax_tot = wHydro * ax[i] + wGrav * (agx != nullptr ? Ta(agx[i]) : Ta(0));

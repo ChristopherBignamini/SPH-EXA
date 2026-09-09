@@ -131,14 +131,16 @@ HOST_DEVICE_FUN auto positionUpdateComoving(double dt, double dt_m1, cstone::Vec
  * Gravity: the tree solver sums G*m_j*(x_j - x_i)/|x_j - x_i|^3 over the *comoving* separations in d.x, so
  * agx/agy/agz hold g_c = a^2 * g_phys. Hence dP/dt|grav = a * g_phys = g_c / a, i.e. wGrav = 1/a.
  *
- * Hydro: the kernel sums produce the comoving density rho_c = a^3 * rho_phys. If d.u / d.temp hold the
- * physical specific internal energy, the equation of state yields p_stored = a^3 * p_phys, and the constant
- * a^3 cancels in the ratio: d.ax = -grad_x p_stored / rho_stored = a * f_phys = dP/dt|hydro, i.e. wHydro = 1.
+ * Hydro: the kernel sums produce the comoving density rho_c = a^3 * rho_phys, and d.u holds the comoving
+ * specific internal energy u_c = a^(3*(gamma-1)) * u_phys, so the equation of state yields
+ * p_stored = (gamma-1) * rho_c * u_c = a^(3*gamma) * p_phys. Tracking that through the volume elements
+ * and the kernel gradient, d.ax comes out as a^(3*gamma-2) * f_phys, so reaching a * f_phys takes
+ * wHydro = a^(3-3*gamma) = a^(-3*(gamma-1)).
  *
- * Both weights are derived here from aNow rather than supplied by the caller, so that they cannot fall out
- * of step with the scale factors driving the drift. wHydro is the one line to revisit if d.u / d.temp are
- * ever redefined to hold something other than the physical specific internal energy (an entropy-like
- * variable would instead bring in a power of a^(-3*(gamma-1))).
+ * The comoving internal energy is used in preference to the physical one because it removes the adiabatic
+ * cooling of the expansion from the energy equation entirely: du_c/dt = -(gamma-1) * u_c * div_x(dx/dt)
+ * carries no -3*H*(gamma-1)*u source term, the same way the canonical momentum carries no Hubble drag.
+ * NOTE: due to above assumptions, d.c is now a^(3*(gamma-1)/2) times the physical sound speed.
  */
 template<class T, class Tg, class Dataset>
 void updatePositionsComovingHost(size_t startIndex, size_t endIndex, Dataset& d, const cstone::Box<T>& box,
@@ -150,7 +152,7 @@ void updatePositionsComovingHost(size_t startIndex, size_t endIndex, Dataset& d,
     cstone::Vec3<T> adjustForFBC{T(1.), T(1.), T(1.)};
 
     //! @brief scale-factor weights of the two acceleration sets, see the note above
-    T wHydro = T(1);
+    T wHydro = std::pow(aNow, T(-3) * (d.gamma - T(1)));
     T wGrav  = T(1) / aNow;
 
 #pragma omp parallel for schedule(static)
