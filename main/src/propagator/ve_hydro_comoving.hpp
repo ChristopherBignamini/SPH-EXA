@@ -125,8 +125,16 @@ protected:
     /*! @brief the list of conserved particles fields with values preserved between iterations
      *
      * x, y, z, h and m are automatically considered conserved and must not be specified in this list
+     *
+     * Unlike HydroVeProp, the thermal variable is "u" rather than "temp". The comoving propagator evolves the
+     * comoving specific internal energy u_hat = a^(3*(gamma-1)) * u_phys, which absorbs the adiabatic cooling
+     * of the expansion (see sph::updatePositionsComovingHost). This choice also selects the code execution paths
+     * by making computeEOS take idealGasEOS_u and sph::computePositionsComoving take updateIntEnergyHost,
+     * both of which work directly on u_hat.
+     *
+     * NOTE: Dividing u by the heat capacity produces now a^(3*(gamma-1)) * T, which is not a physicaltemperature.
      */
-    using ConservedFields = FieldList<"temp", "vx", "vy", "vz", "x_m1", "y_m1", "z_m1", "du_m1", "alpha", "id">;
+    using ConservedFields = FieldList<"u", "vx", "vy", "vz", "x_m1", "y_m1", "z_m1", "du_m1", "alpha", "id">;
 
     //! @brief list of dependent fields, these may be used as scratch space during domain sync
     using DependentFields_ = FieldList<"ax", "ay", "az", "prho", "c", "du", "c11", "c12", "c13", "c22", "c23", "c33",
