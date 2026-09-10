@@ -33,6 +33,7 @@
 
 #pragma once
 
+#include <filesystem>
 #include <memory>
 
 #include "cstone/fields/field_get.hpp"
@@ -40,6 +41,7 @@
 #include "sph/sph.hpp"
 #include "sph/positions_comoving.hpp"
 
+#include "io/arg_parser.hpp"
 #include "ipropagator.hpp"
 #include "gravity_wrapper.hpp"
 #include "cosmology.hpp"
@@ -82,8 +84,8 @@ protected:
 
     /*! @brief scale factors consumed by the comoving integrator, see sph::positionUpdateComoving
      *
-     * aNow_ = a(t_n), aPrevHalf_ = a(t_n - dt_m1/2), aHalf_ = a(t_n + dt/2), aNext_ = a(t_n+1). aNow_ is the
-     * one the acceleration weights are derived from, the others drive the drift and the velocity output.
+     * The factors are defined as: aPrevHalf_ = a(t_n - dt_m1/2), aHalf_ = a(t_n + dt/2), aNext_ = a(t_n+1).
+     * aNow_ = a(t_n) is set in computeForces.
      *
      * They are recomputed once per step in integrate() from cosmo_, so that all four derive from a single
      * a(t). Keeping them derived rather than independently settable is what guarantees the alignment
@@ -98,6 +100,35 @@ protected:
     //! @brief true until the first call to updateScaleFactors, which has no previous step to carry over
     bool firstStep_{true};
 
+    //! @brief set by load() when a snapshot provides a scale factor, cleared by the first consistency check
+    bool restoredFromSnapshot_{false};
+
+    /*! @brief Propagator status parameters
+     *
+     * scaleFactor is needed to make a snapshot physically meaningful: the dataset holds comoving positions
+     * and peculiar velocities, which cannot be interpreted without the a they belong to.
+     *
+     * aHalf is integrator state needed to correctly restart a simulation: updateScaleFactors carries aPrevHalf
+     * over from the previous step aHalf so the two are identical, which is what makes the canonical momentum
+     * conserve exactly. Saving and then loading it lets a restarted run continue that chain instead of
+     * restarting it from a differently rounded expression for the same instant.
+     */
+    struct Params
+    {
+        //! @brief the scale factor at the current time
+        double scaleFactor{1};
+
+        //! @brief the scale factor at the midpoint of the current step
+        double aHalf{1};
+
+        template<class Archive>
+        void loadOrStoreAttributes(Archive* ar)
+        {
+            ar->stepAttribute("cosmo::scaleFactor", &scaleFactor, 1);
+            ar->stepAttribute("cosmo::aHalf", &aHalf, 1);
+        }
+    };
+    Params params_;
 
     /*! @brief compute the scale factors of the current step
      *
@@ -116,7 +147,6 @@ protected:
         double tn = ttot - dt;
 
         aPrevHalf_ = firstStep_ ? T(cosmo_->a(tn - 0.5 * dt_m1)) : aHalf_;
-        aNow_      = cosmo_->a(tn);
         aHalf_     = cosmo_->a(tn + 0.5 * dt);
         aNext_     = cosmo_->a(tn + dt);
         firstStep_ = false;
@@ -207,23 +237,21 @@ public:
      * physical coordinates in order to be consistent with the switch to comoving variables (position, density, etc...)
      * In a future implementation we could think of a more clean solution.
      *
-     * NOTE: this is called from computeForces, where d.ttot is still the time the state belongs to: computeTimestep has
-     * not yet run, so this is the same t_n that integrate() derives as d.ttot - d.minDt, and therefore the
-     * same scale factor that updateScaleFactors will store in aNow_.
+     * This function uses aNow_, which computeForces sets from d.ttot before calling this. computeTimestep has not yet
+     * run at that point, so it is the correct scale factor of the current state.
      *
-     * NOTE: by including the expansion factor in the description, a Hubble dragging term given by -3*H*(gamma-1)*u
+     * By including the expansion factor in the description, a Hubble dragging term given by -3*H*(gamma-1)*u
      * is introduced in the energy equation. That term is a cooling contribution purely due to the expansion itself and
      * can be "removed" by switchig to the comoving internal energy u_c = u* a^(3*(gamma-1)). This means that the internal
      * energy of the HydroData structure is assumed to be the comoving one.
      */
     void scaleInternalEnergyRate(DomainType& domain, typename DataType::HydroData& d, size_t first, size_t last)
     {
-        double aNow = cosmo_->a(d.ttot);
         // exact for the static universe, and a no-op at the present epoch of a real one
-        if (aNow == 1.0) { return; }
+        if (aNow_ == T(1)) { return; }
 
         auto* du = cstone::rawPtr(d.du);
-        cstone::scale(domain.exec(), du + first, du + last, du + first, 1.0 / aNow);
+        cstone::scale(domain.exec(), du + first, du + last, du + first, T(1) / aNow_);
     }
 
     /*! @brief Reject the equations of state whose scale-factor weighting this propagator does not implement
@@ -284,17 +312,30 @@ public:
      */
     void combineAccelerations(typename DataType::HydroData& d, size_t first, size_t last)
     {
-        // aNow is evaluated from d.ttot, which computeTimestep has not yet advanced, so it is the same t_n -- and
-        // therefore bitwise the same scale factor -- that updateScaleFactors later stores in aNow_.
-        T aNow   = cosmo_->a(d.ttot);
-        T wHydro = std::pow(aNow, T(-3) * (d.gamma - T(1)));
-        T wGrav  = T(1) / aNow;
+        T wHydro = std::pow(aNow_, T(-3) * (d.gamma - T(1)));
+        T wGrav  = T(1) / aNow_;
 
         const HydroType* agx = d.g != 0.0 ? cstone::rawPtr(agx_) : nullptr;
         const HydroType* agy = d.g != 0.0 ? cstone::rawPtr(agy_) : nullptr;
         const HydroType* agz = d.g != 0.0 ? cstone::rawPtr(agz_) : nullptr;
 
         combineAccelerationsComoving(first, last, d, agx, agy, agz, wHydro, wGrav);
+    }
+
+    /*! @brief Check if the reconstructed a(t) agrees with the one the snapshot was written at
+     */
+    void checkRestartScaleFactor()
+    {
+        restoredFromSnapshot_ = false;
+
+        double stored = params_.scaleFactor;
+        if (std::abs(aNow_ - stored) <= 1e-9 * std::abs(stored)) { return; }
+
+        throw std::runtime_error("Restart inconsistency: the snapshot was written at scale factor " +
+                                 std::to_string(stored) + " but the cosmology reconstructs " +
+                                 std::to_string(double(aNow_)) +
+                                 " at the restored time. Check that the cosmology settings match the run being "
+                                 "continued\n");
     }
 
     void computeForces(DomainType& domain, DataType& simData) override
@@ -310,6 +351,12 @@ public:
         d.resize(domain.nParticlesWithHalos());
         size_t first = domain.startIndex();
         size_t last  = domain.endIndex();
+
+        // d.ttot is still the time the particles are at: computeTimestep, which advances it, runs in integrate().
+        // This is therefore the same t_n that updateScaleFactors later derives as d.ttot - d.minDt, so aNow_ stays
+        // bitwise consistent with aPrevHalf_/aHalf_/aNext_.
+        aNow_ = cosmo_->a(d.ttot);
+        if (restoredFromSnapshot_) { checkRestartScaleFactor(); }
 
         fillMassHalos(domain.exec(), get<"m">(d), first, last);
 
@@ -394,10 +441,12 @@ public:
         size_t first = domain.startIndex();
         size_t last  = domain.endIndex();
 
+        // d.ax/ay/az already contains the weighted hydro+grav accelerations at this point,
+        // so calculation of the timestep is consistent with the acceleration used in the
+        // integration step
         computeTimestep(first, last, d);
         updateScaleFactors(d.ttot, d.minDt, d.minDt_m1);
         timer.step("Timestep");
-        //! d.ax/ay/az already hold dP/dt, combined by computeForces
         computePositionsComoving(groups_.view(), d, domain.box(), d.minDt, {float(d.minDt_m1)}, aPrevHalf_, aHalf_,
                                  aNext_);
         bool haveUnconvergedParticles = updateSmoothingLength(groups_.view(), d);
@@ -406,6 +455,35 @@ public:
             throw std::runtime_error("Neighbor search did not converge\n");
         }
         timer.step("UpdateQuantities");
+    }
+
+    /*! @brief Update the scale factor belonging to the particle data being written and
+     *         the restarting scale factor at the half-step.
+     */
+    void save(IFileWriter* writer) override
+    {
+        params_.scaleFactor = aNow_;
+        params_.aHalf       = aHalf_;
+        params_.loadOrStoreAttributes(writer);
+    }
+
+    /*! @brief Restore the scale factor for simulation restarting
+     */
+    void load(const std::string& initCond, IFileReader* reader) override
+    {
+        const std::string path = removeModifiers(initCond);
+        if (std::filesystem::exists(path))
+        {
+            int snapshotIndex = numberAfterSign(initCond, ":");
+            reader->setStep(path, snapshotIndex, FileMode::independent);
+            if (reader->stepAttributeSize("cosmo::aHalf") > 0) {
+                params_.loadOrStoreAttributes(reader);
+                aHalf_                = params_.aHalf;
+                firstStep_            = false;
+                restoredFromSnapshot_ = true;
+            }
+            reader->closeStep();
+        }
     }
 
     void saveFields(IFileWriter* writer, size_t first, size_t last, DataType& simData,
