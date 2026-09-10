@@ -85,14 +85,17 @@ extern void computePositionsGpu(const GroupView& grp, float dt, util::array<floa
                                 Ta* az, const uint8_t* rung, Tu* temp, Tu* u, Tdu* du, Tm1* du_m1, Thydro* h,
                                 Thydro* mui, Tc gamma, Tc constCv, const cstone::Box<Tc>& box);
 
-template<class Tc, class Tv, class Ta, class Tg, class Tdu, class Tm1, class Tu, class Thydro>
+template<class Tc, class Tv, class Ta, class Tdu, class Tm1, class Tu, class Thydro>
 extern void computePositionsComovingGpu(const GroupView& grp, float dt, util::array<float, Timestep::maxNumRungs> dt_m1,
                                         Tc* x, Tc* y, Tc* z, Tv* vx, Tv* vy, Tv* vz, Tm1* x_m1, Tm1* y_m1, Tm1* z_m1,
-                                        Ta* ax, Ta* ay, Ta* az, const Tg* agx, const Tg* agy, const Tg* agz,
-                                        const uint8_t* rung, Tu* temp, Tu* u, Tdu* du, Tm1* du_m1, Thydro* h,
-                                        Thydro* mui, Tc gamma, Tc constCv, Tc aNow, Tc aPrevHalf, Tc aHalf,
-                                        Tc aNext,
-                                        const cstone::Box<Tc>& box);
+                                        Ta* ax, Ta* ay, Ta* az, const uint8_t* rung, Tu* temp, Tu* u, Tdu* du,
+                                        Tm1* du_m1, Thydro* h, Thydro* mui, Tc gamma, Tc constCv, Tc aPrevHalf,
+                                        Tc aHalf, Tc aNext, const cstone::Box<Tc>& box);
+
+//! @brief overwrite ax/ay/az with wHydro * hydro + wGrav * gravity, see sph::combineAccelerationsComoving
+template<class Ta, class Tg, class Tw>
+extern void combineAccelerationsComovingGpu(size_t first, size_t last, Ta* ax, Ta* ay, Ta* az, const Tg* agx,
+                                            const Tg* agy, const Tg* agz, Tw wHydro, Tw wGrav);
 
 template<class Th, class KeyType>
 extern bool updateSmoothingLengthGpu(const GroupView&, unsigned ng0, const unsigned* nc, Th* h, KeyType* keys);
