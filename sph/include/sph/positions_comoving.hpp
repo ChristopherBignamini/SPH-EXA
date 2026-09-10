@@ -112,48 +112,53 @@ HOST_DEVICE_FUN auto positionUpdateComoving(double dt, double dt_m1, cstone::Vec
     return util::tuple<cstone::Vec3<T>, cstone::Vec3<T>, cstone::Vec3<T>>{Xnp1, Vnp1, dXnp1};
 }
 
- /*! @brief CPU position update combining hydro (d.ax/ay/az) and gravity (agx/agy/agz) accelerations evaluated on 
- *          comoving coordinates
+/*! @brief weight and combine the hydrodynamic and gravitational accelerations into d.ax/ay/az
  *
- * @param agx         per-particle gravitational acceleration in the x-direction, or nullptr when gravity is disabled
- * @param agy         per-particle gravitational acceleration in the y-direction, or nullptr when gravity is disabled
- * @param agz         per-particle gravitational acceleration in the z-direction, or nullptr when gravity is disabled
- * @param aNow        scale factor at t_n, the time at which the accelerations were evaluated
+ * @param agx,agy,agz  per-particle gravitational acceleration, or nullptr when gravity is disabled
+ * @param wHydro       scale-factor weight of the hydrodynamic acceleration in d.ax/ay/az
+ * @param wGrav        scale-factor weight of the gravitational acceleration in agx/agy/agz
+ *
+ * Overwrites d.ax/ay/az in place with wHydro * hydro + wGrav * gravity. Combining the two sets here is the same
+ * postcondition the standard propagators establish by accumulating gravity into d.ax, and both
+ * sph::accelerationTimestep and the position update rely on it.
+ */
+template<class T, class Tg, class Dataset>
+void combineAccelerationsComoving(size_t startIndex, size_t endIndex, Dataset& d, const Tg* agx, const Tg* agy,
+                                  const Tg* agz, T wHydro, T wGrav)
+{
+    if constexpr (d.useGpu)
+    {
+        combineAccelerationsComovingGpu(startIndex, endIndex, rawPtr(d.ax), rawPtr(d.ay), rawPtr(d.az), agx, agy, agz,
+                                        wHydro, wGrav);
+    }
+    else
+    {
+#pragma omp parallel for schedule(static)
+        for (size_t i = startIndex; i < endIndex; i++)
+        {
+            d.ax[i] = wHydro * d.ax[i] + wGrav * (agx != nullptr ? T(agx[i]) : T(0));
+            d.ay[i] = wHydro * d.ay[i] + wGrav * (agy != nullptr ? T(agy[i]) : T(0));
+            d.az[i] = wHydro * d.az[i] + wGrav * (agz != nullptr ? T(agz[i]) : T(0));
+        }
+    }
+}
+
+/*! @brief CPU position update in comoving coordinates
+ *
  * @param aPrevHalf   scale factor at t_n - dt_m1/2, the midpoint of the previous step
  * @param aHalf       scale factor at t_n + dt/2, the midpoint of the current step
  * @param aNext       scale factor at t_n+1, used to convert the momentum back to a peculiar velocity
  *
- * The two acceleration sets enter the canonical momentum with different powers of the scale factor, which
- * is why they are kept separate up to this point. With the comoving equation of motion written as
- * d2X/dt2 + 2H*dX/dt = f_phys/a for a physical specific force f_phys, the momentum is driven by
- * dP/dt = a^2 * A_x = a * f_phys, and the two contributions weigh in as follows.
- *
- * Gravity: the tree solver sums G*m_j*(x_j - x_i)/|x_j - x_i|^3 over the *comoving* separations in d.x, so
- * agx/agy/agz hold g_c = a^2 * g_phys. Hence dP/dt|grav = a * g_phys = g_c / a, i.e. wGrav = 1/a.
- *
- * Hydro: the kernel sums produce the comoving density rho_c = a^3 * rho_phys, and d.u holds the comoving
- * specific internal energy u_c = a^(3*(gamma-1)) * u_phys, so the equation of state yields
- * p_stored = (gamma-1) * rho_c * u_c = a^(3*gamma) * p_phys. Tracking that through the volume elements
- * and the kernel gradient, d.ax comes out as a^(3*gamma-2) * f_phys, so reaching a * f_phys takes
- * wHydro = a^(3-3*gamma) = a^(-3*(gamma-1)).
- *
- * The comoving internal energy is used in preference to the physical one because it removes the adiabatic
- * cooling of the expansion from the energy equation entirely: du_c/dt = -(gamma-1) * u_c * div_x(dx/dt)
- * carries no -3*H*(gamma-1)*u source term, the same way the canonical momentum carries no Hubble drag.
- * NOTE: due to above assumptions, d.c is now a^(3*(gamma-1)/2) times the physical sound speed.
+ * Expects d.ax/ay/az to hold the combined accelerations from combineAccelerationsComoving.
  */
-template<class T, class Tg, class Dataset>
+template<class T, class Dataset>
 void updatePositionsComovingHost(size_t startIndex, size_t endIndex, Dataset& d, const cstone::Box<T>& box,
-                                 const Tg* agx, const Tg* agy, const Tg* agz, T aNow, T aPrevHalf, T aHalf, T aNext)
+                                 T aPrevHalf, T aHalf, T aNext)
 {
     bool anyFBC = box.boundaryX() == cstone::BoundaryType::fixed || box.boundaryY() == cstone::BoundaryType::fixed ||
                   box.boundaryZ() == cstone::BoundaryType::fixed;
 
     cstone::Vec3<T> adjustForFBC{T(1.), T(1.), T(1.)};
-
-    //! @brief scale-factor weights of the two acceleration sets, see the note above
-    T wHydro = std::pow(aNow, T(-3) * (d.gamma - T(1)));
-    T wGrav  = T(1) / aNow;
 
 #pragma omp parallel for schedule(static)
     for (size_t i = startIndex; i < endIndex; i++)
@@ -162,13 +167,9 @@ void updatePositionsComovingHost(size_t startIndex, size_t endIndex, Dataset& d,
 
         if (anyFBC) { adjustForFBC = fbcAdjustFactors(X, box, d.h[i]); }
 
-        // combination point: dP/dt = wHydro * hydro + wGrav * gravity, see the note above on the weights
-        T ax_tot = wHydro * d.ax[i] + wGrav * (agx != nullptr ? T(agx[i]) : T(0));
-        T ay_tot = wHydro * d.ay[i] + wGrav * (agy != nullptr ? T(agy[i]) : T(0));
-        T az_tot = wHydro * d.az[i] + wGrav * (agz != nullptr ? T(agz[i]) : T(0));
-
+        // d.ax/ay/az already hold dP/dt: the two acceleration sets were weighted and combined by the caller
         // To keep particles belonging to the fixed boundaries from moving, these two quantities need to be adjusted
-        cstone::Vec3<T> A{ax_tot * adjustForFBC[0], ay_tot * adjustForFBC[1], az_tot * adjustForFBC[2]};
+        cstone::Vec3<T> A{d.ax[i] * adjustForFBC[0], d.ay[i] * adjustForFBC[1], d.az[i] * adjustForFBC[2]};
         cstone::Vec3<T> X_m1{d.x_m1[i] * adjustForFBC[0], d.y_m1[i] * adjustForFBC[1], d.z_m1[i] * adjustForFBC[2]};
         cstone::Vec3<T> V;
         util::tie(X, V, X_m1) =
@@ -180,15 +181,14 @@ void updatePositionsComovingHost(size_t startIndex, size_t endIndex, Dataset& d,
     }
 }
 
-/*! @brief advance positions using a separate hydro and gravity acceleration set
+/*! @brief advance positions in comoving coordinates
  *
- * Mirrors sph::computePositions, but combines d.ax/ay/az with the gravity arrays agx/agy/agz.
- * TODO: check energy calculation in the comoving case. 
+ * Mirrors sph::computePositions, differing only in integrating the canonical momentum instead of the velocity.
+ * d.ax/ay/az must already hold the combined accelerations from combineAccelerationsComoving.
  */
-template<class T, class Tg, class Dataset>
+template<class T, class Dataset>
 void computePositionsComoving(const GroupView& grp, Dataset& d, const cstone::Box<T>& box, float dt_forward,
-                              util::array<float, Timestep::maxNumRungs> dt_m1, const Tg* agx, const Tg* agy,
-                              const Tg* agz, T aNow, T aPrevHalf, T aHalf, T aNext,
+                              util::array<float, Timestep::maxNumRungs> dt_m1, T aPrevHalf, T aHalf, T aNext,
                               const uint8_t* rung = nullptr)
 {
     if constexpr (d.useGpu)
@@ -198,16 +198,14 @@ void computePositionsComoving(const GroupView& grp, Dataset& d, const cstone::Bo
 
         computePositionsComovingGpu(grp, dt_forward, dt_m1, rawPtr(d.x), rawPtr(d.y), rawPtr(d.z), rawPtr(d.vx),
                                     rawPtr(d.vy), rawPtr(d.vz), rawPtr(d.x_m1), rawPtr(d.y_m1), rawPtr(d.z_m1),
-                                    rawPtr(d.ax), rawPtr(d.ay), rawPtr(d.az), agx, agy, agz, rung, rawPtr(d.temp),
-                                    rawPtr(d.u), rawPtr(d.du), rawPtr(d.du_m1), rawPtr(d.h), d_mui, d.gamma, constCv,
-                                    aNow, aPrevHalf, aHalf, aNext, box);
+                                    rawPtr(d.ax), rawPtr(d.ay), rawPtr(d.az), rung, rawPtr(d.temp), rawPtr(d.u),
+                                    rawPtr(d.du), rawPtr(d.du_m1), rawPtr(d.h), d_mui, d.gamma, constCv, aPrevHalf,
+                                    aHalf, aNext, box);
     }
     else
     {
-        updatePositionsComovingHost(grp.firstBody, grp.lastBody, d, box, agx, agy, agz, aNow, aPrevHalf, aHalf,
-                                    aNext);
-        
-        // TODO (energy): check energy calculation in the comoving case.
+        updatePositionsComovingHost(grp.firstBody, grp.lastBody, d, box, aPrevHalf, aHalf, aNext);
+
         if (!d.temp.empty()) { updateTempHost(grp.firstBody, grp.lastBody, d, box); }
         else if (!d.u.empty()) { updateIntEnergyHost(grp.firstBody, grp.lastBody, d, box); }
     }

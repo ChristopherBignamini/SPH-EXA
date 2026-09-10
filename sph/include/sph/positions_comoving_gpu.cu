@@ -51,13 +51,13 @@ using cstone::LocalIndex;
  * Check position_comoving.hpp for a discussion of the comoving integration scheme and assumptions about
  * the input/output variables definition. 
  */
-template<class Tc, class Tv, class Ta, class Tg, class Tdu, class Tm1, class Tt, class Thydro>
+template<class Tc, class Tv, class Ta, class Tdu, class Tm1, class Tt, class Thydro>
 __global__ void computePositionsComovingKernel(GroupView grp, float dt,
                                                util::array<float, Timestep::maxNumRungs> dt_m1, Tc* x, Tc* y, Tc* z,
                                                Tv* vx, Tv* vy, Tv* vz, Tm1* x_m1, Tm1* y_m1, Tm1* z_m1, Ta* ax, Ta* ay,
-                                               Ta* az, const Tg* agx, const Tg* agy, const Tg* agz, const uint8_t* rung,
+                                               Ta* az, const uint8_t* rung,
                                                Tt* temp, Tt* u, Tdu* du, Tm1* du_m1, Thydro* h, Thydro* mui, Tc gamma,
-                                               Tc constCv, Tc aNow, Tc aPrevHalf, Tc aHalf, Tc aNext,
+                                               Tc constCv, Tc aPrevHalf, Tc aHalf, Tc aNext,
                                                const cstone::Box<Tc> box, bool anyFBC)
 {
     LocalIndex laneIdx = threadIdx.x & (GpuConfig::warpSize - 1);
@@ -74,16 +74,9 @@ __global__ void computePositionsComovingKernel(GroupView grp, float dt,
     if (anyFBC) { adjustForFBC = fbcAdjustFactors(X, box, h[i]); }
 
     // combination point: total acceleration = hydro + gravity with comoving scale-factor weights
-    // scale-factor weights of the two acceleration sets, see sph::updatePositionsComovingHost
-    Tc wHydro = std::pow(aNow, Tc(-3) * (gamma - Tc(1)));
-    Tc wGrav  = Tc(1) / aNow;
-
-    Ta ax_tot = wHydro * ax[i] + wGrav * (agx != nullptr ? Ta(agx[i]) : Ta(0));
-    Ta ay_tot = wHydro * ay[i] + wGrav * (agy != nullptr ? Ta(agy[i]) : Ta(0));
-    Ta az_tot = wHydro * az[i] + wGrav * (agz != nullptr ? Ta(agz[i]) : Ta(0));
-
+    // ax/ay/az already hold dP/dt: the two acceleration sets were weighted and combined by the caller
     // To keep particles belonging to the fixed boundaries from moving, these two quantities need to be adjusted
-    cstone::Vec3<Tc> A{ax_tot * adjustForFBC[0], ay_tot * adjustForFBC[1], az_tot * adjustForFBC[2]};
+    cstone::Vec3<Tc> A{ax[i] * adjustForFBC[0], ay[i] * adjustForFBC[1], az[i] * adjustForFBC[2]};
     cstone::Vec3<Tc> X_m1{x_m1[i] * adjustForFBC[0], y_m1[i] * adjustForFBC[1], z_m1[i] * adjustForFBC[2]};
     cstone::Vec3<Tc> V;
     util::tie(X, V, X_m1) = positionUpdateComoving(dt, dt_m1_rung, X, A, X_m1, aPrevHalf, aHalf, aNext, box);
@@ -108,12 +101,12 @@ __global__ void computePositionsComovingKernel(GroupView grp, float dt,
     }
 }
 
-template<class Tc, class Tv, class Ta, class Tg, class Tdu, class Tm1, class Tt, class Thydro>
+template<class Tc, class Tv, class Ta, class Tdu, class Tm1, class Tt, class Thydro>
 void computePositionsComovingGpu(const GroupView& grp, float dt, util::array<float, Timestep::maxNumRungs> dt_m1, Tc* x,
                                  Tc* y, Tc* z, Tv* vx, Tv* vy, Tv* vz, Tm1* x_m1, Tm1* y_m1, Tm1* z_m1, Ta* ax, Ta* ay,
-                                 Ta* az, const Tg* agx, const Tg* agy, const Tg* agz, const uint8_t* rung, Tt* temp,
+                                 Ta* az, const uint8_t* rung, Tt* temp,
                                  Tt* u, Tdu* du, Tm1* du_m1, Thydro* h, Thydro* mui, Tc gamma, Tc constCv,
-                                 Tc aNow, Tc aPrevHalf, Tc aHalf, Tc aNext,
+                                 Tc aPrevHalf, Tc aHalf, Tc aNext,
                                  const cstone::Box<Tc>& box)
 {
     unsigned numThreads       = 256;
@@ -125,23 +118,55 @@ void computePositionsComovingGpu(const GroupView& grp, float dt, util::array<flo
 
     if (numBlocks == 0) { return; }
     computePositionsComovingKernel<<<numBlocks, numThreads>>>(grp, dt, dt_m1, x, y, z, vx, vy, vz, x_m1, y_m1, z_m1, ax,
-                                                              ay, az, agx, agy, agz, rung, temp, u, du, du_m1, h, mui,
-                                                              gamma, constCv, aNow, aPrevHalf, aHalf, aNext,
-                                                              box,
-                                                              anyFBC);
+                                                              ay, az, rung, temp, u, du, du_m1, h, mui, gamma,
+                                                              constCv, aPrevHalf, aHalf, aNext, box, anyFBC);
 }
 
-#define POS_COMOVING_GPU(Tc, Tv, Ta, Tg, Tdu, Tm1, Tt, Thydro)                                                         \
+#define POS_COMOVING_GPU(Tc, Tv, Ta, Tdu, Tm1, Tt, Thydro)                                                         \
     template void computePositionsComovingGpu(                                                                         \
         const GroupView& grp, float dt, util::array<float, Timestep::maxNumRungs> dt_m1, Tc* x, Tc* y, Tc* z, Tv* vx,  \
-        Tv* vy, Tv* vz, Tm1* x_m1, Tm1* y_m1, Tm1* z_m1, Ta* ax, Ta* ay, Ta* az, const Tg* agx, const Tg* agy,         \
-        const Tg* agz, const uint8_t* rung, Tt* temp, Tt* u, Tdu* du, Tm1* du_m1, Thydro* h, Thydro* mui, Tc gamma,    \
-        Tc constCv, Tc aNow, Tc aPrevHalf, Tc aHalf, Tc aNext, const cstone::Box<Tc>& box)
+        Tv* vy, Tv* vz, Tm1* x_m1, Tm1* y_m1, Tm1* z_m1, Ta* ax, Ta* ay, Ta* az, const uint8_t* rung, Tt* temp,      \
+        Tt* u, Tdu* du, Tm1* du_m1, Thydro* h, Thydro* mui, Tc gamma, Tc constCv, Tc aPrevHalf, Tc aHalf, Tc aNext,    \
+        const cstone::Box<Tc>& box)
 
-//               Tc      Tv     Ta     Tg     Tdu     Tm1     Tt      Thydro
-POS_COMOVING_GPU(double, double, double, double, double, double, double, double);
-POS_COMOVING_GPU(float, float, float, float, float, float, float, float);
-POS_COMOVING_GPU(double, double, double, double, float, float, double, double);
-POS_COMOVING_GPU(double, float, float, float, double, float, double, float);
+//               Tc      Tv      Ta      Tdu     Tm1     Tt      Thydro
+POS_COMOVING_GPU(double, double, double, double, double, double, double);
+POS_COMOVING_GPU(float, float, float, float, float, float, float);
+POS_COMOVING_GPU(double, double, double, float, float, double, double);
+POS_COMOVING_GPU(double, float, float, double, float, double, float);
+
+/*! @brief overwrite ax/ay/az with wHydro * hydro + wGrav * gravity, see sph::combineAccelerationsComoving */
+template<class Ta, class Tg, class Tw>
+__global__ void combineAccelerationsComovingKernel(size_t first, size_t last, Ta* ax, Ta* ay, Ta* az, const Tg* agx,
+                                                   const Tg* agy, const Tg* agz, Tw wHydro, Tw wGrav)
+{
+    size_t i = first + size_t(blockDim.x) * blockIdx.x + threadIdx.x;
+    if (i >= last) { return; }
+
+    ax[i] = wHydro * ax[i] + wGrav * (agx != nullptr ? Ta(agx[i]) : Ta(0));
+    ay[i] = wHydro * ay[i] + wGrav * (agy != nullptr ? Ta(agy[i]) : Ta(0));
+    az[i] = wHydro * az[i] + wGrav * (agz != nullptr ? Ta(agz[i]) : Ta(0));
+}
+
+template<class Ta, class Tg, class Tw>
+void combineAccelerationsComovingGpu(size_t first, size_t last, Ta* ax, Ta* ay, Ta* az, const Tg* agx, const Tg* agy,
+                                     const Tg* agz, Tw wHydro, Tw wGrav)
+{
+    if (last <= first) { return; }
+
+    unsigned numThreads = 256;
+    unsigned numBlocks  = (last - first + numThreads - 1) / numThreads;
+    combineAccelerationsComovingKernel<<<numBlocks, numThreads>>>(first, last, ax, ay, az, agx, agy, agz, wHydro,
+                                                                  wGrav);
+}
+
+#define COMBINE_ACC_COMOVING_GPU(Ta, Tg, Tw)                                                                           \
+    template void combineAccelerationsComovingGpu(size_t first, size_t last, Ta* ax, Ta* ay, Ta* az, const Tg* agx,    \
+                                                  const Tg* agy, const Tg* agz, Tw wHydro, Tw wGrav)
+
+COMBINE_ACC_COMOVING_GPU(double, double, double);
+COMBINE_ACC_COMOVING_GPU(float, float, float);
+COMBINE_ACC_COMOVING_GPU(double, double, float);
+COMBINE_ACC_COMOVING_GPU(float, float, double);
 
 } // namespace sph
