@@ -260,6 +260,28 @@ public:
                                  "scale-factor weight of the hydrodynamic acceleration is derived for it alone\n");
     }
 
+    /*! @brief Combine the hydrodynamic and gravitational accelerations
+     *
+     * This function is responsible for combining the hydrodynamic and gravitational accelerations into the
+     * ax/ay/az fields of the HydroData according to the comoving description of the system evolution, namely with
+     * correct scale-factor dependencies.
+     *
+     * aNow is evaluated from d.ttot, which computeTimestep has not yet advanced, so it is the same t_n -- and
+     * therefore bitwise the same scale factor -- that updateScaleFactors later stores in aNow_.
+     */
+    void combineAccelerations(typename DataType::HydroData& d, size_t first, size_t last)
+    {
+        T aNow   = cosmo_->a(d.ttot);
+        T wHydro = std::pow(aNow, T(-3) * (d.gamma - T(1)));
+        T wGrav  = T(1) / aNow;
+
+        const HydroType* agx = d.g != 0.0 ? cstone::rawPtr(agx_) : nullptr;
+        const HydroType* agy = d.g != 0.0 ? cstone::rawPtr(agy_) : nullptr;
+        const HydroType* agz = d.g != 0.0 ? cstone::rawPtr(agz_) : nullptr;
+
+        combineAccelerationsComoving(first, last, d, agx, agy, agz, wHydro, wGrav);
+    }
+
     void computeForces(DomainType& domain, DataType& simData) override
     {
         timer.start();
@@ -327,6 +349,8 @@ public:
         {
             //! gravitational acceleration is accumulated into a dedicated set, separate from the hydro ax/ay/az
             reallocate(domain.nParticlesWithHalos(), d.getAllocGrowthRate(), agx_, agy_, agz_);
+            //TODO: it is possible that we can avoid the use of separate arrays for the gravitational acceleration 
+            // and directly accumulate it into the hydro acceleration with the right weight.
             cstone::fill(domain.exec(), agx_.begin(), agx_.end(), HydroType(0));
             cstone::fill(domain.exec(), agy_.begin(), agy_.end(), HydroType(0));
             cstone::fill(domain.exec(), agz_.begin(), agz_.end(), HydroType(0));
@@ -343,6 +367,10 @@ public:
             timer.logStatistics("sumP2P", stats[0] / timer.getLastStepTime());
             timer.logStatistics("sumM2P", stats[2] / timer.getLastStepTime());
         }
+
+        //! @brief from here on d.ax/ay/az hold dP/dt = a * f_phys, not the hydrodynamic acceleration alone
+        combineAccelerations(d, first, last);
+        timer.step("CombineAccelerations");
     }
 
     void integrate(DomainType& domain, DataType& simData) override
@@ -354,12 +382,9 @@ public:
         computeTimestep(first, last, d);
         updateScaleFactors(d.ttot, d.minDt, d.minDt_m1);
         timer.step("Timestep");
-        //! gravity is stored in a separate acceleration set; pass it (or nullptr) to the combining integrator
-        const HydroType* agx = d.g != 0.0 ? cstone::rawPtr(agx_) : nullptr;
-        const HydroType* agy = d.g != 0.0 ? cstone::rawPtr(agy_) : nullptr;
-        const HydroType* agz = d.g != 0.0 ? cstone::rawPtr(agz_) : nullptr;
-        computePositionsComoving(groups_.view(), d, domain.box(), d.minDt, {float(d.minDt_m1)}, agx, agy, agz,
-                                 aNow_, aPrevHalf_, aHalf_, aNext_);
+        //! d.ax/ay/az already hold dP/dt, combined by computeForces
+        computePositionsComoving(groups_.view(), d, domain.box(), d.minDt, {float(d.minDt_m1)}, aPrevHalf_, aHalf_,
+                                 aNext_);
         bool haveUnconvergedParticles = updateSmoothingLength(groups_.view(), d);
         if (haveUnconvergedParticles && not d.removeUnconvergedParticles)
         {
