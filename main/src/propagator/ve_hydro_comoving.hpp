@@ -226,10 +226,45 @@ public:
         cstone::scale(domain.exec(), du + first, du + last, du + first, 1.0 / aNow);
     }
 
+    /*! @brief Reject the equations of state whose scale-factor weighting this propagator does not implement
+     *
+     * updatePositionsComovingHost hard-codes wHydro = a^(-3*(gamma-1)), which is the weight that converts the
+     * hydrodynamic acceleration into a canonical momentum rate only for the ideal gas driven by the comoving
+     * internal energy u_c. Writing p_stored = a^n * p_phys, where p_ is stands for pressure, the volume elements
+     * and the kernel gradient turn that into d.ax = a^(n-2) * f_phys, and reaching a * f_phys needs
+     * wHydro = a^(3-n). The three equations ofstate do not share an n:
+     *
+     *   ideal gas with u_hat   p_stored = (gamma-1) * rho_c * u_c   = a^(3*gamma) * p_phys   -> w_hydro = a^(-3*(gamma-1))
+     *   isothermal             p_stored = rho_c * c^2               = a^3 * p_phys           -> w_hydro = 1
+     *   polytropic             p_stored = K * rho_c^gamma_poly      = a^(3*gamma_poly)       -> w_hydro = a^(-3*(gamma_poly-1))
+     *
+     * The isothermal case would therefore be wrong by a^(-3*(gamma-1)) and the polytropic one needs d.polytropic_index
+     * rather than d.gamma. Both are also conceptually wrong for this propagator: neither closure involves the
+     * internal energy, so the comoving energy variable that motivates this propagator carries no meaning for them.
+     * In the ideal case p_stored corresponds to the comoving pressure.
+     *
+     * The check cannot live in the constructor, which never sees the dataset, nor in activateFields, which runs
+     * before the initializer has populated d.eosChoice.
+     *
+     * TODO: this is a temporary solution to avoid the use of unsupported equations of state with the comoving propagator.
+     * In a future implementation we could think of a more clean solution.
+     * TODO: it should be possible to implement the isothermal and polytropic equations of state in a comoving description
+     * with minimal code changes by using an effective gamma depending on the EoS choice and by changing the ConservedFields
+     * list accordingly since the comoving internal energy is not needed for those two EoS.
+     */
+    void checkEosSupported(const typename DataType::HydroData& d) const
+    {
+        if (d.eosChoice == sph::EosType::idealGas) { return; }
+
+        throw std::runtime_error("The comoving propagator only supports the ideal gas equation of state: the "
+                                 "scale-factor weight of the hydrodynamic acceleration is derived for it alone\n");
+    }
+
     void computeForces(DomainType& domain, DataType& simData) override
     {
         timer.start();
         pmReader.start();
+        checkEosSupported(simData.hydro);
         sync(domain, simData);
         timer.step("domain::sync");
         Base::logDomainStats(domain, simData);
