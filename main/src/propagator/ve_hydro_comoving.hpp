@@ -266,11 +266,26 @@ public:
      * ax/ay/az fields of the HydroData according to the comoving description of the system evolution, namely with
      * correct scale-factor dependencies.
      *
-     * aNow is evaluated from d.ttot, which computeTimestep has not yet advanced, so it is the same t_n -- and
-     * therefore bitwise the same scale factor -- that updateScaleFactors later stores in aNow_.
+     * Gravity: the tree solver sums G*m_j*(x_j - x_i)/|x_j - x_i|^3 over the *comoving* separations in d.x, so
+     * agx/agy/agz hold g_c = a^2 * g_phys. Hence dP/dt|grav = a * g_phys = g_c / a, i.e. wGrav = 1/a.
+     *
+     * Hydro: the kernel sums produce the comoving density rho_c = a^3 * rho_phys, and d.u holds the comoving
+     * specific internal energy u_c = a^(3*(gamma-1)) * u_phys, so the equation of state yields
+     * p_stored = (gamma-1) * rho_c * u_c = a^(3*gamma) * p_phys. Tracking that through the volume elements and the
+     * kernel gradient, d.ax comes out as a^(3*gamma-2) * f_phys, so reaching a * f_phys takes
+     * wHydro = a^(3-3*gamma) = a^(-3*(gamma-1)).
+     *
+     * After this call d.ax/ay/az hold dP/dt = a * f_phys, the canonical momentum rate. Both weights are
+     * dimensionless, so this still has the dimensions of an acceleration, but it is not the comoving acceleration
+     * d2X/dt2: the two differ by a^2 and the Hubble drag,
+     *
+     *     dP/dt = a^2 * (d2X/dt2 + 2*H*dX/dt).
+     *
      */
     void combineAccelerations(typename DataType::HydroData& d, size_t first, size_t last)
     {
+        // aNow is evaluated from d.ttot, which computeTimestep has not yet advanced, so it is the same t_n -- and
+        // therefore bitwise the same scale factor -- that updateScaleFactors later stores in aNow_.
         T aNow   = cosmo_->a(d.ttot);
         T wHydro = std::pow(aNow, T(-3) * (d.gamma - T(1)));
         T wGrav  = T(1) / aNow;
