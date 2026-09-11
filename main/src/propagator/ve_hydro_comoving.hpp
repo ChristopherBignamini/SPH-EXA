@@ -260,6 +260,7 @@ public:
      * can be "removed" by switchig to the comoving internal energy u_c = u* a^(3*(gamma-1)). This means that the internal
      * energy of the HydroData structure is assumed to be the comoving one.
      */
+
     void scaleInternalEnergyRate(DomainType& domain, typename DataType::HydroData& d, size_t first, size_t last)
     {
         // exact for the static universe, and a no-op at the present epoch of a real one
@@ -294,6 +295,23 @@ public:
         cstone::scale(d.exec, c + first, c + last, c + first, std::pow(aNow_, T(-1.5) * (d.gamma - T(1))));
     }
 
+    /*! @brief Correct the Courant time step for the comoving smoothing length
+     *
+     * sph::tsKCourant returns Kcour * h / v, with v the signal velocity. Every other input is already a physical
+     * velocity: c after scaleSoundSpeed, and w_ij because the comoving separation cancels between the dot
+     * product and the distance it is divided by. The smoothing length is not, it is comoving like the
+     * coordinates it is used with, so the returned step is short of the physical one by exactly one factor of a:
+     *
+     *     dt_phys = Kcour * h_phys / v = Kcour * a * h_com / v = a * tsKCourant(Kcour, h_com, v)
+     *
+     * Applied to the reduced scalar rather than to the per-particle d.dtCourant, because both backends already
+     * reduce into d.minDtCourant (see sph::computeMomentumEnergy) and nothing else reads the per-particle field.
+     * No guard on a == 1 is needed: multiplying a double by exactly 1.0 is the identity.
+     *
+     * TODO: the signal velocity is still underestimated because the peculiar approach speed w_ij is used instead
+     * of the physical one, which adds a dragging term H*r_ij with r_ij the physical distance.
+     */
+    void scaleCourantTimestep(typename DataType::HydroData& d) { d.minDtCourant *= aNow_; }
 
     /*! @brief Reject the equations of state whose scale-factor weighting this propagator does not implement
      *
@@ -447,6 +465,7 @@ public:
         acquire(d, "ay", "az");
         computeMomentumEnergy<avClean>(groups_.view(), nullptr, d, domain.box());
         scaleInternalEnergyRate(domain, d, first, last);
+        scaleCourantTimestep(d);
         timer.step("MomentumAndEnergy");
         pmReader.step();
 
