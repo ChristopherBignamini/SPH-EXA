@@ -24,6 +24,7 @@
 #include "sph/particles_data.hpp"
 #include "sph/sph.hpp"
 #include "sph/positions_comoving.hpp"
+#include "sph/ts_global_comoving.hpp"
 
 #include "io/arg_parser.hpp"
 #include "ipropagator.hpp"
@@ -75,6 +76,33 @@ protected:
      * a(t). Keeping them derived rather than independently settable is what guarantees the alignment
      * aPrevHalf(step n+1) == aHalf(step n), on which the exact momentum conservation of the integrator
      * rests.
+     *
+     * TODO (team discussion): consider moving the current scale factor onto ParticlesData as a global scalar,
+     * next to gamma / eosChoice / etaAcc, defaulting to 1 and persisted through optionalIO. It would be named
+     * scaleFactor rather than a, since d.a next to d.ax/ay/az reads badly.
+     *
+     * In favour. The shared time-step helpers all take d, so accelerationTimestep and rhoTimestep could apply
+     * their own scale-factor correction instead of the propagator patching the result afterwards. That removes
+     * the need to smuggle a corrected value in through the variadic extraTimesteps of computeTimestep, and with
+     * it the question of which of the two competing values wins the min. More generally it would turn the
+     * pattern here from "compute in the wrong convention, then correct" into "compute correctly", which is what
+     * scaleInternalEnergyRate, scaleSoundSpeed and scaleCourantTimestep are all working around. It would also
+     * subsume Params::scaleFactor, since the dataset would persist it.
+     *
+     * Against, first. It puts this propagator's conventions into code every propagator compiles: a correction
+     * of the form "multiply by d.scaleFactor" is only right given a comoving h and d.ax holding dP/dt. Other
+     * propagators run at a == 1 so it is inert for them today, but the assumption would live in a file that
+     * does not state it.
+     *
+     * Against, second. If the integration moves from point evaluations of a to integral time operators
+     * (D = int dt/a^2 and the corresponding kick factors), the integrator's own factors stop being point
+     * evaluations and a single stored a serves them no better than it does now. Note though that this only
+     * affects the integrator: the convention the stored fields are expressed in, u_c = a^(3*(gamma-1))*u and
+     * rho_c = a^3*rho, is instantaneous by definition, as is the Courant condition, so that role survives the
+     * change either way.
+     *
+     * Either way the four factors below stay here: they are step-relative integrator state, not a property of
+     * the dataset.
      */
     T aNow_{1}, aPrevHalf_{1}, aHalf_{1}, aNext_{1};
 
@@ -148,7 +176,7 @@ protected:
     /*! @brief compute the scale factors of the current step
      *
      * TODO: check if the following condition is correct
-     * Must be called after computeTimestep, which has already advanced d.ttot to the end of the step and
+     * Must be called after computeTimestepComoving, which has already advanced d.ttot to the end of the step and
      * updated d.minDt / d.minDt_m1. The start of the current step is therefore d.ttot - d.minDt.
      *
      * aPrevHalf_ is carried over from the previous step's aHalf_ rather than recomputed. The two denote the
@@ -252,7 +280,7 @@ public:
      * physical coordinates in order to be consistent with the switch to comoving variables (position, density, etc...)
      * In a future implementation we could think of a more clean solution.
      *
-     * This function uses aNow_, which computeForces sets from d.ttot before calling this. computeTimestep has not yet
+     * This function uses aNow_, which computeForces sets from d.ttot before calling this. computeTimestepComoving has not yet
      * run at that point, so it is the correct scale factor of the current state.
      *
      * By including the expansion factor in the description, a Hubble dragging term given by -3*H*(gamma-1)*u
@@ -411,7 +439,7 @@ public:
         size_t first = domain.startIndex();
         size_t last  = domain.endIndex();
 
-        // d.ttot is still the time the particles are at: computeTimestep, which advances it, runs in integrate().
+        // d.ttot is still the time the particles are at: computeTimestepComoving, which advances it, runs in integrate().
         // This is therefore the same t_n that updateScaleFactors later derives as d.ttot - d.minDt, so aNow_ stays
         // bitwise consistent with aPrevHalf_/aHalf_/aNext_.
         aNow_ = cosmo_->a(d.ttot);
@@ -506,7 +534,7 @@ public:
         // d.ax/ay/az already contains the weighted hydro+grav accelerations at this point,
         // so calculation of the timestep is consistent with the acceleration used in the
         // integration step
-        computeTimestep(first, last, d);
+        computeTimestepComoving(first, last, d, aNow_);
         updateScaleFactors(d.ttot, d.minDt, d.minDt_m1);
         timer.step("Timestep");
         computePositionsComoving(groups_.view(), d, domain.box(), d.minDt, {float(d.minDt_m1)}, aPrevHalf_, aHalf_,
