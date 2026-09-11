@@ -1,26 +1,10 @@
 /*
- * MIT License
+ * SPH-EXA
  *
- * Copyright (c) 2021 CSCS, ETH Zurich
- *               2021 University of Basel
+ * Copyright (c) 2026 CSCS, ETH Zurich, University of Zurich, University of Basel
  *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in all
- * copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
+ * Please, refer to the LICENSE file in the root directory.
+ * SPDX-License-Identifier: MIT License
  */
 
 /*! @file
@@ -112,6 +96,37 @@ protected:
      * over from the previous step aHalf so the two are identical, which is what makes the canonical momentum
      * conserve exactly. Saving and then loading it lets a restarted run continue that chain instead of
      * restarting it from a differently rounded expression for the same instant.
+     *
+     * TODO: to be removed once the documentation is in place.
+     * This is a temporary measure to document the expected behavior of the snapshot format.
+     * A snapshot stores every field in whatever convention the code holds it in, plus the scale factor,
+     * and leaves the conversion to the external users. Physical quantities can be obtained by multiplying
+     * the stored ones by the appropriate power of the scale factor reported in the second column.
+     *
+     *   x, y, z            a                  comoving position R, physical r = a*R
+     *   x_m1, y_m1, z_m1   a                  comoving position increment of the previous step
+     *   vx, vy, vz         1                  peculiar velocity v = a*dR/dt; the physical one adds H*r
+     *   h                  a                  smoothing length, comoving like the coordinates
+     *   m                  1                  mass
+     *   u                  a^(-3*(gamma-1))   comoving internal energy u_c
+     *   rho                a^-3               comoving density rho_c = a^3 * rho_phys
+     *   p, prho            a^(-3*gamma)       comoving pressure p_c = a^(3*gamma) * p_phys
+     *   c                  1                  already physical, see scaleSoundSpeed
+     *   ax, ay, az         a^-1               dP/dt = a * f_phys, see sph::combineAccelerationsComoving
+     *   ugrav              a^-1               potential summed over comoving separations
+     *   c11 ... c33        a^-2               inverse second moment of the IAD operator
+     *   divv, curlv        a^-1               comoving gradients of the peculiar velocity, so this is the
+     *                                         peculiar part alone: the physical divergence adds 3*H
+     *   dV11 ... dV33      a^-1               velocity gradient components, as divv
+     *   xm                 a^3                comoving volume element
+     *   kx, gradh          1                  dimensionless
+     *   alpha, nc, id      1                  dimensionless or counters
+     *   dtCourant          a                  pending the time-step correction, see the Courant notes
+     *   du, du_m1          n/a                rate of the comoving u, not a fixed power of a:
+     *                                         du_c/dt = a^(3*(gamma-1)) * (du/dt + 3*H*(gamma-1)*u)
+     *   temp, cv, mui      n/a                not allocated here, this propagator evolves u
+     *   mue, tdpdTrho      n/a                not allocated here
+     *   keys               n/a                SFC keys of the comoving coordinates, no physical counterpart
      */
     struct Params
     {
@@ -254,6 +269,32 @@ public:
         cstone::scale(domain.exec(), du + first, du + last, du + first, T(1) / aNow_);
     }
 
+    /*! @brief Rescale the sound speed produced by computeEOS into the physical one
+     *
+     * The equation of state builds c from the stored internal energy, which is the comoving u_c, so it returns
+     * sqrt(gamma*(gamma-1)*u_c) = a^(3*(gamma-1)/2) * c_phys. This has to be taken into account since the sound
+     * speed is used to compute the signal velocity in MomentumAndEnergyInteraction and is involved in the calculation
+     * of artificial_viscosity as well, where c is mixed with peculiar velocities times comoving separations with no
+     * implicit cancelation of the scaling factor so we have to do that explicitly.
+     *
+     * It must be noted that this function must be called before the halo exchange of "c": scaling only [first, last)
+     * and exchanging afterwards would leave halo particles with the comoving value while local ones carry the physical
+     * one, which shows up only at rank boundaries and only for some decompositions.
+     *
+     * TODO: This leaves the dataset deliberately split, d.prho stays comoving, d.c becomes physical, so the two are no
+     * longer related by c^2 = gamma*p/rho in stored variables. Nothing recomputes one from the other today, but
+     * anything that starts to must account for it.
+     */
+    void scaleSoundSpeed(typename DataType::HydroData& d, size_t first, size_t last)
+    {
+        // exact for the static universe, and a no-op at the present epoch of a real one
+        if (aNow_ == T(1)) { return; }
+
+        auto* c = cstone::rawPtr(d.c);
+        cstone::scale(d.exec, c + first, c + last, c + first, std::pow(aNow_, T(-1.5) * (d.gamma - T(1))));
+    }
+
+
     /*! @brief Reject the equations of state whose scale-factor weighting this propagator does not implement
      *
      * updatePositionsComovingHost hard-codes wHydro = a^(-3*(gamma-1)), which is the weight that converts the
@@ -383,6 +424,8 @@ public:
         timer.step("IadVelocityDivCurlGradh");
 
         computeEOS(first, last, d);
+        //! @brief must precede the halo exchange of "c" below, so that halos carry the physical sound speed too
+        scaleSoundSpeed(d, first, last);
         timer.step("EquationOfState");
 
         domain.exchangeHalos(get<"c11", "c12", "c13", "c22", "c23", "c33", "divv", "c">(d), get<"ax">(d),
@@ -523,6 +566,8 @@ public:
         release(d, "c11", "c12", "c13");
         acquire(d, "rho", "p", "gradh");
         computeEOS(first, last, d);
+        //! @brief "c" is not in the default output set, but if it is requested it should match the run's value
+        scaleSoundSpeed(d, first, last);
         output();
         release(d, "rho", "p", "gradh");
         acquire(d, "c11", "c12", "c13");
