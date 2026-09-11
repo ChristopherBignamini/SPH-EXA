@@ -77,31 +77,19 @@ protected:
      * aPrevHalf(step n+1) == aHalf(step n), on which the exact momentum conservation of the integrator
      * rests.
      *
-     * TODO (team discussion): consider moving the current scale factor onto ParticlesData as a global scalar,
-     * next to gamma / eosChoice / etaAcc, defaulting to 1 and persisted through optionalIO. It would be named
-     * scaleFactor rather than a, since d.a next to d.ax/ay/az reads badly.
+     * TODO: consider moving the current scale factor onto ParticlesData as a global scalar defaulting to 1
+     * and persisted through optionalIO: the time-step helpers all take d, so accelerationTimestep and rhoTimestep
+     * could apply their own scale-factor correction instead of the propagator patching the result afterwards.
+     * More generally it would turn the pattern here from "compute in the wrong convention, then correct" into
+     * "compute correctly", which is what scaleInternalEnergyRate, scaleSoundSpeed and scaleCourantTimestep
+     * are doing. Nevertheless, this approach would put this propagator conventions into code every propagator
+     * compiles while a correction of the form "multiply by d.scaleFactor" is only right in case of a
+     * "comoving propagator" and useless in other cases (unless we consider the other cases as comoving with a=1).
+     * It must be noted that this data member would still be useful if the integration moves from point evaluations
+     * of a to integral time operators (in SWIFT style) since the re-scaling of the hydrodynamic variables would
+     * still need point-wise evaluations of a(t).
      *
-     * In favour. The shared time-step helpers all take d, so accelerationTimestep and rhoTimestep could apply
-     * their own scale-factor correction instead of the propagator patching the result afterwards. That removes
-     * the need to smuggle a corrected value in through the variadic extraTimesteps of computeTimestep, and with
-     * it the question of which of the two competing values wins the min. More generally it would turn the
-     * pattern here from "compute in the wrong convention, then correct" into "compute correctly", which is what
-     * scaleInternalEnergyRate, scaleSoundSpeed and scaleCourantTimestep are all working around. It would also
-     * subsume Params::scaleFactor, since the dataset would persist it.
-     *
-     * Against, first. It puts this propagator's conventions into code every propagator compiles: a correction
-     * of the form "multiply by d.scaleFactor" is only right given a comoving h and d.ax holding dP/dt. Other
-     * propagators run at a == 1 so it is inert for them today, but the assumption would live in a file that
-     * does not state it.
-     *
-     * Against, second. If the integration moves from point evaluations of a to integral time operators
-     * (D = int dt/a^2 and the corresponding kick factors), the integrator's own factors stop being point
-     * evaluations and a single stored a serves them no better than it does now. Note though that this only
-     * affects the integrator: the convention the stored fields are expressed in, u_c = a^(3*(gamma-1))*u and
-     * rho_c = a^3*rho, is instantaneous by definition, as is the Courant condition, so that role survives the
-     * change either way.
-     *
-     * Either way the four factors below stay here: they are step-relative integrator state, not a property of
+     * Either way the four factors should stay here: they are step-relative integrator state, not a property of
      * the dataset.
      */
     T aNow_{1}, aPrevHalf_{1}, aHalf_{1}, aNext_{1};
