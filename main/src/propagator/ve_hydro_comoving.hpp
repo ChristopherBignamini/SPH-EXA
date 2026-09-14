@@ -10,6 +10,100 @@
 /*! @file
  * @brief A Propagator class for modern SPH with generalized volume elements in comoving coordinates
  *
+ * Definitions and conventions
+ * ---------------------------
+ *
+ * Comoving coordinates: the expansion is factored out of the positions through the scale factor a(t) so that
+ * a physical position r is written r = a*R, with R the comoving position held in x/y/z.
+ *
+ * Differentiating r = a*R splits the physical velocity in two,
+ *
+ *     dr/dt = H*r + v,   with the peculiar velocity v = a*dR/dt and Hubble parameter H = da/dt / a.,
+ *
+ * the Hubble flow H*r being pure expansion and v the motion relative to it. The code stores v in vx/vy/vz, as a
+ * physical velocity. Written in these variables the equation of motion picks up a friction term, the Hubble drag,
+ *
+ *     d2R/dt2 + 2*H*dR/dt = A_R,
+ *
+ * where A_R is the peculiar acceleration, the physical one divided by a. The integrator does not apply that term
+ * explicitly: it evolves the specific canonical momentum P = a*v = a^2*dR/dt, whose equation of motion
+ * dP/dt = a^2*A_R is drag free, and recovers the stored v as P/a at the end of the step.
+ *
+ * Density, pressure and specific internal energy are stored with the expansion scaled out as well,
+ *
+ *     rho_c = a^3 * rho,   p_c = a^(3*gamma) * p,   u_c = a^(3*(gamma-1)) * u,
+ *
+ * the powers being those that make each variable constant under pure adiabatic expansion of an ideal gas. The
+ * cooling term -3*H*(gamma-1)*u that the expansion introduces in the energy equation is absorbed by u_c, which
+ * is why this propagator evolves "u" rather than "temp". The gamma dependence is also why only the ideal gas is
+ * supported here, see checkEosSupported. In the comoving density the expansion drops out of the continuity
+ * equation entirely,
+ *
+ *     d(rho_c)/dt = -rho_c * (grad_r . v),
+ *
+ * leaving the peculiar velocity divergence alone, whereas the divergence of the full physical velocity field is
+ * grad_r . (dr/dt) = 3*H + grad_r . v. Which of the two a given expression needs is decided case by case, see
+ * scaleRhoTimestep for one that needs the peculiar part and the artificial viscosity notes for ones that do not
+ * (see the TODO concerning AV switching).
+ *
+ * The gravity that drives the peculiar motion is not the potential of the full density but of its fluctuation
+ * about the background: the peculiar potential phi solves grad_R^2(phi) = 4*pi*G*a^2*(rho - rho_mean), and with
+ * it the momentum equation above is simply dP/dt = -grad_R(phi). Summing the potential over comoving separations,
+ * which is what the tree traversal does, produces the potential of the total density instead, related to the
+ * peculiar one by the factor 1/a that combineAccelerations applies as wGrav and by the background term that is
+ * still missing, see the open item below.
+ *
+ * A note on mixed conventions. The stored fields are deliberately not all in the same frame: lengths (x/y/z, h)
+ * are comoving while velocities (vx/vy/vz) and the sound speed are physical. The table below states the convention
+ * for every field.
+ *
+ * TODO: to be removed once the documentation is in place.
+ * This is a temporary measure to document the expected behavior of the snapshot format. A snapshot stores every
+ * field in whatever convention the code holds it in, plus the scale factor, and leaves the conversion to the
+ * external users. Physical quantities can be obtained by multiplying the stored ones by the appropriate power
+ * of the scale factor reported in the second column.
+ *
+ *   x, y, z            a                  comoving position R, physical r = a*R
+ *   x_m1, y_m1, z_m1   a                  comoving position increment of the previous step
+ *   vx, vy, vz         1                  peculiar velocity v = a*dR/dt; the physical one adds H*r
+ *   h                  a                  smoothing length, comoving like the coordinates
+ *   m                  1                  mass
+ *   u                  a^(-3*(gamma-1))   comoving internal energy u_c
+ *   rho                a^-3               comoving density rho_c = a^3 * rho_phys
+ *   p, prho            a^(-3*gamma)       comoving pressure p_c = a^(3*gamma) * p_phys
+ *   c                  1                  already physical, see scaleSoundSpeed
+ *   ax, ay, az         a^-1               dP/dt = a * f_phys, see sph::combineAccelerationsComoving
+ *   ugrav              a^-1               potential summed over comoving separations
+ *   c11 ... c33        a^-2               inverse second moment of the IAD operator
+ *   divv, curlv        a^-1               comoving gradients of the peculiar velocity, so this is the
+ *                                         peculiar part alone: the physical divergence adds 3*H
+ *   dV11 ... dV33      a^-1               velocity gradient components, as divv
+ *   xm                 a^3                comoving volume element
+ *   kx, gradh          1                  dimensionless
+ *   alpha, nc, id      1                  dimensionless or counters
+ *   dtCourant          a                  pending the time-step correction, see the Courant notes
+ *   du, du_m1          n/a                rate of the comoving u, not a fixed power of a:
+ *                                         du_c/dt = a^(3*(gamma-1)) * (du/dt + 3*H*(gamma-1)*u)
+ *   temp, cv, mui      n/a                not allocated here, this propagator evolves u
+ *   mue, tdpdTrho      n/a                not allocated here
+ *   keys               n/a                SFC keys of the comoving coordinates, no physical counterpart
+ *
+ * TODO: stll missing:
+ * - Testing of all the elements added vs ve_hydro.hpp
+ * - Initial conditions: ICs with cosmology, and restart from snapshots with cosmology: we need to decide how
+ *   the IC are defined, how the snapshot is written, and how the restart is done.
+ * - AV switch: AVswitchesPostamble makes use of the stored divv which is the comoving one: if a region has a negative
+ *   comoving divergence but a positive net physical one due to Hubble drag, we take the wrong branch. The correction
+ *   requires to correctly inclyde the Hubble drag term in the check (should be 3*H*a).
+ * - Hubble timestep: A timestep calculation related to pure expansion is currently missing.
+ * - Particle data: ParticleData is currently storing a mix of comoving/peculiar/etc... quantities: it is a temporary
+ *   solution to avoid changes in the rest of the code but a more consistent and documented approach is needed,
+ *   particularly to allow the user to understand what is stored in the snapshot and how to convert it to physical
+ *   quantities.
+ * - Peculiar/comoving potential: the gravitational acceleration is currently computed as in the standard SPH-EXA case
+ *   but the momentum equation requires the peculiar one, namely the gradient of the potential solving the Poisson equation
+ *   for density fluctuations. 
+ *
  * @author Sebastian Keller <sebastian.f.keller@gmail.com>
  * @author Jose A. Escartin <ja.escartin@gmail.com>
  * @author ChristopherBignamini <christopher.bignamini@gmail.com>
@@ -112,37 +206,6 @@ protected:
      * over from the previous step aHalf so the two are identical, which is what makes the canonical momentum
      * conserve exactly. Saving and then loading it lets a restarted run continue that chain instead of
      * restarting it from a differently rounded expression for the same instant.
-     *
-     * TODO: to be removed once the documentation is in place.
-     * This is a temporary measure to document the expected behavior of the snapshot format.
-     * A snapshot stores every field in whatever convention the code holds it in, plus the scale factor,
-     * and leaves the conversion to the external users. Physical quantities can be obtained by multiplying
-     * the stored ones by the appropriate power of the scale factor reported in the second column.
-     *
-     *   x, y, z            a                  comoving position R, physical r = a*R
-     *   x_m1, y_m1, z_m1   a                  comoving position increment of the previous step
-     *   vx, vy, vz         1                  peculiar velocity v = a*dR/dt; the physical one adds H*r
-     *   h                  a                  smoothing length, comoving like the coordinates
-     *   m                  1                  mass
-     *   u                  a^(-3*(gamma-1))   comoving internal energy u_c
-     *   rho                a^-3               comoving density rho_c = a^3 * rho_phys
-     *   p, prho            a^(-3*gamma)       comoving pressure p_c = a^(3*gamma) * p_phys
-     *   c                  1                  already physical, see scaleSoundSpeed
-     *   ax, ay, az         a^-1               dP/dt = a * f_phys, see sph::combineAccelerationsComoving
-     *   ugrav              a^-1               potential summed over comoving separations
-     *   c11 ... c33        a^-2               inverse second moment of the IAD operator
-     *   divv, curlv        a^-1               comoving gradients of the peculiar velocity, so this is the
-     *                                         peculiar part alone: the physical divergence adds 3*H
-     *   dV11 ... dV33      a^-1               velocity gradient components, as divv
-     *   xm                 a^3                comoving volume element
-     *   kx, gradh          1                  dimensionless
-     *   alpha, nc, id      1                  dimensionless or counters
-     *   dtCourant          a                  pending the time-step correction, see the Courant notes
-     *   du, du_m1          n/a                rate of the comoving u, not a fixed power of a:
-     *                                         du_c/dt = a^(3*(gamma-1)) * (du/dt + 3*H*(gamma-1)*u)
-     *   temp, cv, mui      n/a                not allocated here, this propagator evolves u
-     *   mue, tdpdTrho      n/a                not allocated here
-     *   keys               n/a                SFC keys of the comoving coordinates, no physical counterpart
      */
     struct Params
     {
@@ -161,7 +224,7 @@ protected:
     };
     Params params_;
 
-    /*! @brief compute the scale factors of the current step
+    /*! @brief Compute the scale factors of the current step
      *
      * TODO: check if the following condition is correct
      * Must be called after computeTimestepComoving, which has already advanced d.ttot to the end of the step and
@@ -324,8 +387,10 @@ public:
      * reduce into d.minDtCourant (see sph::computeMomentumEnergy) and nothing else reads the per-particle field.
      * No guard on a == 1 is needed: multiplying a double by exactly 1.0 is the identity.
      *
-     * TODO: the signal velocity is still underestimated because the peculiar approach speed w_ij is used instead
-     * of the physical one, which adds a dragging term H*r_ij with r_ij the physical distance.
+     * TODO: The peculiar w_ij, which is the one currently computed, should be the right input for the signal velocity.
+     * However, the same w_ij does need the Hubble drag where it feeds the artificial viscosity, as w_ij + adot*dist
+     * with dist the comoving separation. Without it a pair that is receding physically but approaching in
+     * peculiar terms still dissipates, which is the pair-level form of the missing 3*H*a in the AV switch.
      */
     void scaleCourantTimestep(typename DataType::HydroData& d) { d.minDtCourant *= aNow_; }
 
@@ -486,7 +551,8 @@ public:
         domain.exchangeHalos(get<"c11", "c12", "c13", "c22", "c23", "c33", "divv", "c">(d), get<"ax">(d),
                              get<"keys">(d));
         timer.step("mpi::synchronizeHalos");
-
+        // TODO: the AV switch is currently using the comoving divergence, which is not the right quantity to check for,
+        // see the comment in scaleCourantTimestep documentation.
         computeAVswitches(groups_.view(), d, domain.box());
         timer.step("AVswitches");
 
@@ -510,8 +576,8 @@ public:
         {
             //! gravitational acceleration is accumulated into a dedicated set, separate from the hydro ax/ay/az
             reallocate(domain.nParticlesWithHalos(), d.getAllocGrowthRate(), agx_, agy_, agz_);
-            //TODO: it is possible that we can avoid the use of separate arrays for the gravitational acceleration 
-            // and directly accumulate it into the hydro acceleration with the right weight.
+            //TODO: is it possible to avoid the use of separate arrays for the gravitational acceleration
+            // and directly accumulate it into the hydro acceleration with the right weights?
             cstone::fill(domain.exec(), agx_.begin(), agx_.end(), HydroType(0));
             cstone::fill(domain.exec(), agy_.begin(), agy_.end(), HydroType(0));
             cstone::fill(domain.exec(), agz_.begin(), agz_.end(), HydroType(0));
