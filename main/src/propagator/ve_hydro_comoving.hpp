@@ -81,9 +81,9 @@ protected:
      * and persisted through optionalIO: the time-step helpers all take d, so accelerationTimestep and rhoTimestep
      * could apply their own scale-factor correction instead of the propagator patching the result afterwards.
      * More generally it would turn the pattern here from "compute in the wrong convention, then correct" into
-     * "compute correctly", which is what scaleInternalEnergyRate, scaleSoundSpeed and scaleCourantTimestep
-     * are doing. Nevertheless, this approach would put this propagator conventions into code every propagator
-     * compiles while a correction of the form "multiply by d.scaleFactor" is only right in case of a
+     * "compute correctly", which is what scaleInternalEnergyRate, scaleSoundSpeed, scaleCourantTimestep and
+     * scaleRhoTimestep are doing. Nevertheless, this approach would put this propagator conventions into code
+     * every propagator compiles while a correction of the form "multiply by d.scaleFactor" is only right in case of a
      * "comoving propagator" and useless in other cases (unless we consider the other cases as comoving with a=1).
      * It must be noted that this data member would still be useful if the integration moves from point evaluations
      * of a to integral time operators (in SWIFT style) since the re-scaling of the hydrodynamic variables would
@@ -329,6 +329,26 @@ public:
      */
     void scaleCourantTimestep(typename DataType::HydroData& d) { d.minDtCourant *= aNow_; }
 
+    /*! @brief Correct the density time step for the comoving peculiar velocity divergence
+     *
+     * sph::rhoTimestep returns Krho / |divv|, and divv is currently storing the comoving gradient of the peculiar
+     * velocity, divv = a * (grad_r . v_pec). At the same time, the stored density is the comoving one and according
+     * to its continuity equation we have:
+     *
+     *     d(rho_c)/dt = -rho_c * (grad_r . v_pec)
+     *
+     * The time step that limits the relative change of the comoving density is therefore
+     *
+     *     dt = a*Krho / |divv|
+     *
+     * where Krho is the usual relatie density change factor.
+     *
+     * The correction is applied to the reduced scalar for the same reason as in scaleCourantTimestep:
+     * sph::rhoTimestep has already reduced over the particles and nothing else reads the result. No guard on
+     * a == 1 is needed.
+     */
+    void scaleRhoTimestep(typename DataType::HydroData& d) { d.minDtRho *= aNow_; }
+
     /*! @brief Reject the equations of state whose scale-factor weighting this propagator does not implement
      *
      * updatePositionsComovingHost hard-codes wHydro = a^(-3*(gamma-1)), which is the weight that converts the
@@ -455,6 +475,7 @@ public:
         acquire(d, "divv", "gradh");
         computeIadDivvCurlvGradh(groups_.view(), d, domain.box());
         d.minDtRho = rhoTimestep(first, last, d);
+        scaleRhoTimestep(d);
         timer.step("IadVelocityDivCurlGradh");
 
         computeEOS(first, last, d);
